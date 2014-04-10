@@ -239,8 +239,10 @@ class MSAwriter(object):
 
 
 def main():
+	possibleActions = ('replicate','write', 'plotMSA', 'plotMSX')
+
 	parser = argparse.ArgumentParser(description='Write MSA shotfiles.')
-	parser.add_argument('action')
+	parser.add_argument('action', help='one of: %s'%(' '.join(possibleActions)))
 	parser.add_argument('-se', '--src-exp', type=str, default='AUGD')
 	parser.add_argument('-sn', '--src-num', type=int, required=True)
 	parser.add_argument('-de', '--dest-exp', type=str, default='AUGD')
@@ -249,7 +251,6 @@ def main():
 
 	args = parser.parse_args()
 
-	possibleActions = ('replicate','write', 'plotMSA', 'plotMSX')
 	if args.action not in possibleActions:
 		print 'action must be one of these:', possibleActions
 		return False
