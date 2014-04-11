@@ -23,7 +23,7 @@ class MSAwriter(object):
 
 		# load R Z A* dR dZ dZdR from old shotfile
 		R    = src.GetObject('R').data
-		Z    = src.GetObject('R').data
+		Z    = src.GetObject('Z').data
 		A1   = src.GetObject('A1').data
 		A2   = src.GetObject('A2').data
 		A3   = src.GetObject('A3').data
