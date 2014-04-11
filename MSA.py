@@ -112,6 +112,8 @@ class MSAwriter(object):
         calib_factor = -MSC.GetParameter('C_MSX', 'p0')
         # get faraday rotation degree
         faraday_degree    = MSC.GetParameter('C_Farada', 'BTF')  
+        if faraday_degree == None:
+            return False
         # get b1 absolute offset
         b1 = MSC.GetParameter('C_Angle', 'b1')
         MSC.Close(); del MSC
