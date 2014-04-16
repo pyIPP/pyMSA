@@ -1,12 +1,47 @@
 #!/usr/bin/env python
 
-import os, sys
-import numpy as np
-import dd_local as dd, ww_local as ww
-import matplotlib.pyplot as plt
-import argparse
-from pylab import specgram
-from scipy.interpolate import interp1d
+# ssh qa11
+# setenv PYTHONPATH /afs/ipp/aug/ads-diags/common/python/lib
+# module load python27/basic
+try:
+    import os, sys
+    import numpy as np
+    import dd_20140409 as dd, ww_20140403 as ww
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    import argparse
+    from pylab import specgram
+    from scipy.interpolate import interp1d
+    import warnings
+    import random
+except Exception, e:
+    print '(%s)'%e
+    print '''This program runs best on the Linux machines.
+Please execute the following commands to connect to one and
+load the necessary prerequisites:
+
+ssh qa01
+setenv PYTHONPATH /afs/ipp/aug/ads-diags/common/python/lib
+module load python27/basic
+./MSA.py -h
+
+to try again.
+
+Otherwise contact abock or submit an issue at 
+https://github.com/pyIPP/pyMSA/issues'''
+    sys.exit()
+
+# unfinished work: better plotting colors
+#base = ['00', 'ff', '33']
+#colors = []
+#for a in base:
+#	for b in base:
+#		for c in base:
+#			colors.append('#%s%s%s'%(a, b, c))
+#random.shuffle(colors)		
+#mpl.rcParams['axes.color_cycle'] = colors
+#from matplotlib import cm
+#sys.exit()
 
 class MSAwriter(object):
     """Writes MSA shotfiles."""
@@ -104,27 +139,33 @@ class MSAwriter(object):
     def latestMSCfile(self, shot=0, exp='MSED'):
         return dd.PreviousShot('MSC', shot, exp)
 
-    def readMSX(self, exp, shot, nfft):
-        # get latest calib factor (p0)
-        MSC = dd.shotfile()
-        if not MSC.Open('MSC', self.latestMSCfile(shot, 'MSED'), 'MSED'):
-            return False
-        calib_factor = -MSC.GetParameter('C_MSX', 'p0')
-        # get faraday rotation degree
-        faraday_degree    = MSC.GetParameter('C_Farada', 'BTF')  
-        if faraday_degree == None:
-            return False
-        # get b1 absolute offset
-        b1 = MSC.GetParameter('C_Angle', 'b1')
-        MSC.Close(); del MSC
-        # get BTF
-        TOT = dd.shotfile()
-        if not TOT.Open('TOT', shot, 'AUGD'):
-            return False
-        BTFt = TOT.GetTimebase('BTF') 
-        BTFd = -TOT.GetSignal('BTF')
-        BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)
-        TOT.Close(); del TOT
+    def readMSX(self, exp, shot, nfft, use_calibration=True):
+        if use_calibration:
+            # get latest calib factor (p0)
+            MSC = dd.shotfile()
+            if not MSC.Open('MSC', self.latestMSCfile(shot, 'MSED'), 'MSED'):
+                return False
+            calib_factor = -MSC.GetParameter('C_MSX', 'p0')
+            # get faraday rotation degree
+            faraday_degree    = MSC.GetParameter('C_Farada', 'BTF')  
+            if faraday_degree == None:
+                return False
+            # get b1 absolute offset
+            b1 = MSC.GetParameter('C_Angle', 'b1')
+            MSC.Close(); del MSC
+            # get BTF
+            TOT = dd.shotfile()
+            if not TOT.Open('TOT', shot, 'AUGD'):
+                return False
+            BTFt = TOT.GetTimebase('BTF') 
+            BTFd = -TOT.GetSignal('BTF')
+            BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)
+            TOT.Close(); del TOT
+        else:
+            calib_factor = [0.8]*10
+            faraday_degree = [-0.7]*10
+            BTF = interp1d([-10, 100], [-2.5, -2.5], fill_value=-2.5, bounds_error=False)
+            b1 = 66.7
 
         src = dd.shotfile()
         if not src.Open('MSX', shot, exp):
@@ -157,7 +198,7 @@ class MSAwriter(object):
 
     def write(self, args, onlyNBI3=True, nfft=8192, showPlot=False):
 
-        res = self.readMSX(args.src_exp, args.src_num, nfft)
+        res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
         if res == False:
             return False
         gmt, gm = res
@@ -190,21 +231,25 @@ class MSAwriter(object):
 
         # get latest AUGD MSA file as a template
         latestMSA = self.latestMSAfile(args.src_num, 'AUGD')
+        if latestMSA == 0:
+            warnings.warn("No AUGD:MSA file found for %i, using 29000 instead."%args.src_num)
+            latestMSA = 29000
         res = self.readMSA('AUGD', latestMSA)
         if res == False:
             return False
         res = list(res)
 
+        # warning: this code was taken from mse_class, but is wrong.
         # now set v_beam:
-        t0 = gmt.min()
-        t1 = gmt.max()
-        nis = dd.shotfile()
-        nis.Open('NIS', args.src_num)
-        pniq = nis.GetSignalGroup('PNIQ')
-        pniqt = nis.GetTimebase('PNIQ')
-        index0 = np.abs(pniqt-t0).argmin()
-        index1 = np.abs(pniqt-t1).argmin()
-        vbeam = np.average(pniq[index0:index1+1, 2, 0])
+        #t0 = gmt.min()
+        #t1 = gmt.max()
+        #nis = dd.shotfile()
+        #nis.Open('NIS', args.src_num)
+        #pniq = nis.GetSignalGroup('PNIQ')
+        #pniqt = nis.GetTimebase('PNIQ')
+        #index0 = np.abs(pniqt-t0).argmin()
+        #index1 = np.abs(pniqt-t1).argmin()
+        vbeam = 0 #np.average(pniq[index0:index1+1, 2, 0])
 
         res[14] = gmt # TMSA
         res[15] = gm # gm
@@ -221,13 +266,16 @@ class MSAwriter(object):
             if res == False:
                 return False
             plt.plot(res[14], res[15])
+            plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
             plt.show()
         else:
-            res = self.readMSX(args.src_exp, args.src_num, nfft)
+            res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
             if res == False:
                 return False
             gmt, gm = res
-            plt.plot(gmt, gm)
+            lineObjects = plt.plot(gmt, gm)
+            plt.legend(lineObjects, ['ch %i'%i for i in range(1,11)], fontsize=8)
+            plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
             plt.show()
         return True
 
@@ -240,15 +288,27 @@ class MSAwriter(object):
         return self.writeMSA(args.dest_exp, args.dest_num, res, RzAfile=args.RzA_file)
 
 def main():
-    possibleActions = ('replicate','write', 'plotMSA', 'plotMSX')
+    possibleActions = ['replicate','write', 'plotMSA', 'plotMSX']
+    paexpl = ['re-write existing MSA file', 'write MSA file from MSX file',
+        'read and plot MSA file', 'compute angles from MSX and only plot']
 
-    parser = argparse.ArgumentParser(description='Write MSA shotfiles.')
-    parser.add_argument('action', help='one of: %s'%(' '.join(possibleActions)))
-    parser.add_argument('-se', '--src-exp', type=str, default='AUGD')
-    parser.add_argument('-sn', '--src-num', type=int, required=True)
-    parser.add_argument('-de', '--dest-exp', type=str, default='AUGD')
-    parser.add_argument('-dn', '--dest-num', type=int)
-    parser.add_argument('-rza', '--RzA-file', type=str, default=None)
+    parser = argparse.ArgumentParser(description='Handle MSX data.')
+    parser.add_argument('-sn', '--src-num', type=int, required=True,
+        help='source shotnumber, e.g. -se 29761')
+    parser.add_argument('-se', '--src-exp', type=str, default='AUGD',
+        help='source experiment, e.g. -se AUGD')
+    parser.add_argument('-de', '--dest-exp', type=str, default='AUGD',
+        help='destination experiment, e.g. -de ABOCK')
+    parser.add_argument('-dn', '--dest-num', type=int,
+        help='destination shotnumber, e.g. -dn 123')
+    parser.add_argument('-rza', '--RzA-file', type=str, default=None,
+        help='optional file with new R,Z,A numbers, e.g. -rza RzAs2014.txt')
+    parser.add_argument('-nc', '--no-calibration', dest='use_calibration', action='store_false', default=True,
+        help="don't load calibration from MSC, use average hardcoded values instead")
+    parser.add_argument('-i124', '--ignore-NBI124', dest='ignore_NBI124', action='store_true', default=False,
+        help="don't remove data where wrong NBI configuration was present")
+    parser.add_argument('action', help='one of: %s'%(
+        '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
     args = parser.parse_args()
 
@@ -263,7 +323,7 @@ def main():
             print 'something went wrong :-('
             return False
     elif args.action == 'write':
-        if not writer.write(args):
+        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124)):
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
