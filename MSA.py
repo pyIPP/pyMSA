@@ -265,7 +265,11 @@ class MSAwriter(object):
             res = self.readMSA(args.src_exp, args.src_num)
             if res == False:
                 return False
-            plt.plot(res[14], res[15])
+            if args.only_channels != None:
+                channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
+            else:
+                channels2use = np.array(range(10))
+            plt.plot(res[14], res[15][:, channels2use])
             plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
             plt.show()
         else:
@@ -273,8 +277,12 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm = res
-            lineObjects = plt.plot(gmt, gm)
-            plt.legend(lineObjects, ['ch %i'%i for i in range(1,11)], fontsize=8)
+            if args.only_channels != None:
+                channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
+            else:
+                channels2use = np.array(range(10))
+            lineObjects = plt.plot(gmt, gm[:,channels2use])
+            plt.legend(lineObjects, ['ch %i'%(i+1) for i in channels2use], fontsize=8)
             plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
             plt.show()
         return True
@@ -307,6 +315,8 @@ def main():
         help="don't load calibration from MSC, use average hardcoded values instead")
     parser.add_argument('-i124', '--ignore-NBI124', dest='ignore_NBI124', action='store_true', default=False,
         help="don't remove data where wrong NBI configuration was present")
+    parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
+        help="only plot channels 1,2,5")
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
