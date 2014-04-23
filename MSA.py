@@ -317,6 +317,8 @@ def main():
         help="don't remove data where wrong NBI configuration was present")
     parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
         help="only plot channels 1,2,5")
+    parser.add_argument('-nfft', type=int, default=8192,
+        help='FFT window length, e.g. -nfft 8192')
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
@@ -337,8 +339,8 @@ def main():
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
-        if not ((args.action == 'plotMSA' and writer.plot('MSA', args))
-            or  (args.action == 'plotMSX' and writer.plot('MSX', args))):
+        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, args.nfft))
+            or  (args.action == 'plotMSX' and writer.plot('MSX', args, args.nfft))):
             print 'something went wrong :-('
             return False
     print 'okey-dokey'
