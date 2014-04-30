@@ -281,9 +281,19 @@ class MSAwriter(object):
                 channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
             else:
                 channels2use = np.array(range(10))
+            ax = plt.subplot(111)
             lineObjects = plt.plot(gmt, gm[:,channels2use])
             plt.legend(lineObjects, ['ch %i'%(i+1) for i in channels2use], fontsize=8)
             plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
+            plt.xlabel('t [s]')
+            plt.ylabel('g_m [deg]')
+            
+            from matplotlib.ticker import MultipleLocator
+            ax.xaxis.set_minor_locator(MultipleLocator(0.5))
+            ax.yaxis.set_minor_locator(MultipleLocator(0.2))
+            
+            plt.grid(True, 'both')
+            
             plt.show()
         return True
 
