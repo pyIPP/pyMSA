@@ -249,7 +249,13 @@ class MSAwriter(object):
         #pniqt = nis.GetTimebase('PNIQ')
         #index0 = np.abs(pniqt-t0).argmin()
         #index1 = np.abs(pniqt-t1).argmin()
-        vbeam = 0 #np.average(pniq[index0:index1+1, 2, 0])
+        #vbeam = 0 #np.average(pniq[index0:index1+1, 2, 0])
+        
+        # self calculation instead:
+        NIS = dd.shotfile()
+        if not NIS.Open('NIS', args.src_num):
+            return False
+        vbeam = np.sqrt(2*NIS.GetParameter('INJ1', 'UEXQ')[2]*1e3*1.602e-19 / 3.344e-27) # in m/s
 
         res[14] = gmt # TMSA
         res[15] = gm # gm
