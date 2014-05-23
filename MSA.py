@@ -14,6 +14,7 @@ try:
     from scipy.interpolate import interp1d
     import warnings
     import random
+    import getpass
 except Exception, e:
     print '(%s)'%e
     print '''This program runs best on the Linux machines.
@@ -290,7 +291,7 @@ class MSAwriter(object):
         res[18] = gm*0 + 180. # errgm2
         res[19] = vbeam # vbeam
 
-        return self.writeMSA(args.dest_exp, args.dest_num, res, RzAfile=args.RzA_file)
+        return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res, RzAfile=args.RzA_file)
 
     def plot(self, what, args, nfft=8192, smooth_window=None):
         if what=='MSA':
@@ -352,9 +353,9 @@ def main():
         help='source shotnumber, e.g. -se 29761')
     parser.add_argument('-se', '--src-exp', type=str, default='AUGD',
         help='source experiment, e.g. -se AUGD')
-    parser.add_argument('-de', '--dest-exp', type=str, default='AUGD',
+    parser.add_argument('-de', '--dest-exp', type=str, default=getpass.getuser().upper(),
         help='destination experiment, e.g. -de ABOCK')
-    parser.add_argument('-dn', '--dest-num', type=int,
+    parser.add_argument('-dn', '--dest-num', type=int, default=None,
         help='destination shotnumber, e.g. -dn 123')
     parser.add_argument('-rza', '--RzA-file', type=str, default=None,
         help='optional file with new R,Z,A numbers, e.g. -rza RzAs2014.txt')
