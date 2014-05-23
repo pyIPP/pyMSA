@@ -139,6 +139,20 @@ class MSAwriter(object):
     def latestMSCfile(self, shot=0, exp='MSED'):
         return dd.PreviousShot('MSC', shot, exp)
 
+    def _movingAverage(self, signal, n):
+        ret = np.cumsum(signal, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1:] / n
+
+    def smooth(self, gmt, gm, smooth_window):
+        dt = gmt[1] - gmt[0]
+        n = max(1, int(smooth_window/dt/1e3))
+        print 'smoothing over %i post-fft samples...'%n
+        new_gmt = self._movingAverage(gmt, n)
+        new_gm = np.array([self._movingAverage(g, n) for g in gm.T]).T
+        #print 'in', gm.shape, 'out', new_gm.shape
+        return new_gmt, new_gm
+
     def readMSX(self, exp, shot, nfft, use_calibration=True):
         if use_calibration:
             # get latest calib factor (p0)
@@ -154,13 +168,21 @@ class MSAwriter(object):
             b1 = MSC.GetParameter('C_Angle', 'b1')
             MSC.Close(); del MSC
             # get BTF
-            TOT = dd.shotfile()
-            if not TOT.Open('TOT', shot, 'AUGD'):
-                return False
-            BTFt = TOT.GetTimebase('BTF') 
-            BTFd = -TOT.GetSignal('BTF')
-            BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)
-            TOT.Close(); del TOT
+            if shot < 30160:
+                TOT = dd.shotfile()
+                if not TOT.Open('TOT', shot, 'AUGD'):
+                    return False
+                BTFt = TOT.GetTimebase('BTF') 
+                BTFd = -TOT.GetSignal('BTF')
+                TOT.Close(); del TOT
+            else:
+                MBI = dd.shotfile()
+                if not MBI.Open('MBI', shot, 'AUGD'):
+                    return False
+                BTFt = MBI.GetTimebase('BTF')
+                BTFd = MBI.GetSignal('BTF')
+                MBI.Close()
+            BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)            
         else:
             calib_factor = [0.8]*10
             faraday_degree = [-0.7]*10
@@ -194,14 +216,18 @@ class MSAwriter(object):
             #print faraday_degree[ch], BTF(0.), b1
             mse.append(cmse-90)
 
+
         return (np.array(mset), np.array(mse).T)
 
-    def write(self, args, onlyNBI3=True, nfft=8192, showPlot=False):
+    def write(self, args, onlyNBI3=True, nfft=8192, showPlot=False, smooth_window=None):
 
         res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
         if res == False:
             return False
         gmt, gm = res
+
+        if smooth_window != None:
+            gmt, gm = self.smooth(gmt, gm, smooth_window)
 
         if onlyNBI3:
             # remove items where NBI1,2,4 were on/NBI3 off
@@ -266,7 +292,7 @@ class MSAwriter(object):
 
         return self.writeMSA(args.dest_exp, args.dest_num, res, RzAfile=args.RzA_file)
 
-    def plot(self, what, args, nfft=8192):
+    def plot(self, what, args, nfft=8192, smooth_window=None):
         if what=='MSA':
             res = self.readMSA(args.src_exp, args.src_num)
             if res == False:
@@ -275,7 +301,10 @@ class MSAwriter(object):
                 channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
             else:
                 channels2use = np.array(range(10))
-            plt.plot(res[14], res[15][:, channels2use])
+            gmt, gm = res[14:16]
+            if smooth_window != None:
+                gmt, gm = self.smooth(gmt, gm, smooth_window)
+            plt.plot(gmt, gm[:, channels2use])
             plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
             plt.show()
         else:
@@ -283,6 +312,8 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm = res
+            if smooth_window != None:
+                gmt, gm = self.smooth(gmt, gm, smooth_window)
             if args.only_channels != None:
                 channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
             else:
@@ -333,8 +364,14 @@ def main():
         help="don't remove data where wrong NBI configuration was present")
     parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
         help="only plot channels 1,2,5")
-    parser.add_argument('-nfft', type=int, default=8192,
-        help='FFT window length, e.g. -nfft 8192')
+    parser.add_argument('-nfft', type=int, default=4096,
+        help='FFT window length, e.g. -nfft 4096')
+    #parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
+    #    help='not yet implemented!!!!!!! reorder channels, e.g. -co 1,2,3,4,5,6,7,9,8,10')
+    
+    parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
+        help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
+    
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
@@ -351,12 +388,12 @@ def main():
             print 'something went wrong :-('
             return False
     elif args.action == 'write':
-        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124)):
+        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124), smooth_window=args.smooth_window):
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
-        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, args.nfft))
-            or  (args.action == 'plotMSX' and writer.plot('MSX', args, args.nfft))):
+        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, args.nfft, smooth_window=args.smooth_window))
+            or  (args.action == 'plotMSX' and writer.plot('MSX', args, args.nfft, smooth_window=args.smooth_window))):
             print 'something went wrong :-('
             return False
     print 'okey-dokey'
