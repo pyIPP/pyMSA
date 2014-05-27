@@ -373,7 +373,7 @@ def main():
     parser.add_argument('-nfft', type=int, default=4096,
         help='FFT window length, e.g. -nfft 4096')
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
-        help='not yet implemented!!!!!!! reorder channels, e.g. -co 1,2,3,4,5,6,7,9,8,10')
+        help='reorder channels, e.g. -co 1,2,3,4,5,6,7,9,8,10')
     
     parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
         help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
