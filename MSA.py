@@ -227,6 +227,9 @@ class MSAwriter(object):
             return False
         gmt, gm = res
 
+        if args.channel_order != None:
+            gm = gm[:, args.channel_order]
+
         if smooth_window != None:
             gmt, gm = self.smooth(gmt, gm, smooth_window)
 
@@ -313,6 +316,8 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm = res
+            if args.channel_order != None:
+                gm = gm[:, args.channel_order]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
             if args.only_channels != None:
@@ -367,8 +372,8 @@ def main():
         help="only plot channels 1,2,5")
     parser.add_argument('-nfft', type=int, default=4096,
         help='FFT window length, e.g. -nfft 4096')
-    #parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
-    #    help='not yet implemented!!!!!!! reorder channels, e.g. -co 1,2,3,4,5,6,7,9,8,10')
+    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
+        help='not yet implemented!!!!!!! reorder channels, e.g. -co 1,2,3,4,5,6,7,9,8,10')
     
     parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
         help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
@@ -377,6 +382,11 @@ def main():
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
     args = parser.parse_args()
+    try:
+        args.channel_order = np.array(args.channel_order.split(','), dtype=int) - 1
+    except Exception, e:
+        raise e
+
 
     if args.action not in possibleActions:
         print 'action must be one of these:', possibleActions
