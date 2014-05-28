@@ -368,8 +368,8 @@ def main():
         help="don't remove data where wrong NBI configuration was present")
     parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
         help="only plot channels 1,2,5")
-    parser.add_argument('-nfft', type=int, default=4096,
-        help='FFT window length, e.g. -nfft 4096')
+    parser.add_argument('-nfft', type=int, default=2048,
+        help='FFT window length, e.g. -nfft 2048')
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,9,8,10',
         help='reorder channels, e.g. by default "-co 1,2,3,4,5,6,7,9,8,10"')
     
