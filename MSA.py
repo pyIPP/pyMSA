@@ -301,10 +301,9 @@ class MSAwriter(object):
             res = self.readMSA(args.src_exp, args.src_num)
             if res == False:
                 return False
-            if args.only_channels != None:
-                channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
-            else:
-                channels2use = np.array(range(10))
+
+            channels2use = args.only_channels
+
             gmt, gm = res[14:16]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
@@ -320,10 +319,9 @@ class MSAwriter(object):
                 gm = gm[:, args.channel_order]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
-            if args.only_channels != None:
-                channels2use = np.array(args.only_channels.split(','), dtype=int) - 1
-            else:
-                channels2use = np.array(range(10))
+            
+            channels2use = args.only_channels
+
             ax = plt.subplot(111)
             lineObjects = plt.plot(gmt, gm[:,channels2use])
             plt.legend(lineObjects, ['ch %i'%(i+1) for i in channels2use], fontsize=8)
@@ -372,8 +370,8 @@ def main():
         help="only plot channels 1,2,5")
     parser.add_argument('-nfft', type=int, default=4096,
         help='FFT window length, e.g. -nfft 4096')
-    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
-        help='reorder channels, e.g. -co 1,2,3,4,5,6,7,9,8,10')
+    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,9,8,10',
+        help='reorder channels, e.g. by default "-co 1,2,3,4,5,6,7,9,8,10"')
     
     parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
         help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
@@ -382,8 +380,18 @@ def main():
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
     args = parser.parse_args()
+    
     try:
-        args.channel_order = np.array(args.channel_order.split(','), dtype=int) - 1
+        if args.channel_order != None:
+            args.channel_order = np.array(args.channel_order.split(','), dtype=int) - 1
+    except Exception, e:
+        raise e
+
+    try:
+        if args.only_channels != None:
+            args.only_channels = np.array(args.channel_order.split(','), dtype=int) - 1
+        else:
+            args.only_channels = range(10)
     except Exception, e:
         raise e
 
