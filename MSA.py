@@ -222,6 +222,10 @@ class MSAwriter(object):
 
     def write(self, args, onlyNBI3=True, nfft=8192, showPlot=False, smooth_window=None):
 
+        if args.RzA_file == None:
+            raise Exception("no RzAfile given. aborting write process. Please specify one with -rza argument.")
+            return False
+
         res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
         if res == False:
             return False
@@ -360,8 +364,8 @@ def main():
         help='destination experiment, e.g. -de ABOCK')
     parser.add_argument('-dn', '--dest-num', type=int, default=None,
         help='destination shotnumber, e.g. -dn 123')
-    parser.add_argument('-rza', '--RzA-file', type=str, default="RzAs2014b.txt",
-        help='optional file with new R,Z,A numbers, e.g. (default:) -rza RzAs2014b.txt')
+    parser.add_argument('-rza', '--RzA-file', type=str, default=None,
+        help='optional file with new R,Z,A numbers, e.g. -rza RzAs2014b.txt')
     parser.add_argument('-nc', '--no-calibration', dest='use_calibration', action='store_false', default=True,
         help="don't load calibration from MSC, use average hardcoded values instead")
     parser.add_argument('-i124', '--ignore-NBI124', dest='ignore_NBI124', action='store_true', default=False,
