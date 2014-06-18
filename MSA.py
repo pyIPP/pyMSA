@@ -209,9 +209,19 @@ class MSAwriter(object):
         sg1 = src.GetSignalGroup('SG-1')
         sg1t = src.GetTimebase('SG-1')/1e9 # nanoseconds...
         mse = []
+
+        # reference signals from PEMs
+        res40 = specgram(sg1[:,15], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2, mode='angle')
+        res46 = specgram(sg1[:,14], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2, mode='angle')
+
+        labels = src.GetParameter('CH-SETUP', 'PI/SIGMA')
+        labels = ['pi' if l == 1 else 'sigma' for l in labels]
+
         for ch in range(self.n_chan):
             print '%2i/%2i' %(ch+1, self.n_chan)
             res = specgram(sg1[:,ch], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2)
+            res2 = specgram(sg1[:,ch], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2, mode='angle')
+            pha = np.array(res2[0])
             #plt.clf() # specgram produces a plot, throw it away
             
             I = np.array(res[0])
@@ -223,12 +233,24 @@ class MSAwriter(object):
 
             I1 = np.sum(I[i40], axis=0)**0.5
             I2 = np.sum(I[i46], axis=0)**0.5
-            #plt.plot(I1); plt.plot(I2); plt.plot(I1/I2); plt.show(); return False
-            cmse = np.arctan2(calib_factor[ch]*I1, I2)*90./np.pi
+
+            # Single phase lock-in will get polarimetry phase automatically.
+            # Fourier approach needs manual reconstruction.
+            # Normally: 90deg rotation from full positive lock-in output = full negative lock-in output
+            # Here: compare phases from spectrogram with reference phases from PEMs
+            # reconstruct negative amplitudes by generating a vector filled with +-1
+            # step 1: subtract phases from each other, map into 0..2pi
+            # step 2: convert parts > pi and < pi as necessary to 0 and 1, multiply by 2, subtract 1
+            # => vector with +1's and -1's according to phase relation at that time point
+            phadiff40 = ((res40[0][i40[len(i40)/2]]-pha[i40[len(i40)/2]])%(2*np.pi) > np.pi).astype(int)*2-1
+            phadiff46 = ((res46[0][i46[len(i40)/2]]-pha[i46[len(i40)/2]])%(2*np.pi) < np.pi).astype(int)*2-1
+
+            cmse = np.arctan2(calib_factor[ch]*I1*phadiff40, I2*phadiff46)*180./np.pi*0.5 # stokes polarimetry 0.5!
             cmse += faraday_degree[ch]*BTF(mset)
             cmse += b1
-            #print faraday_degree[ch], BTF(0.), b1
-            mse.append(cmse-90)
+
+            #mse.append(cmse if labels[ch] == 'sigma' else cmse-90) # todo: option to subtract value from either angle kind
+            mse.append(cmse)
         # construct configuration object
         print 'generating geometric information from FARO (lib/mse2014.txt) and MSX/CH-SETUP...'
         rza = makeRzAs('lib/mse2014.txt')
