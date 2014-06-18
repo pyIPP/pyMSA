@@ -167,7 +167,9 @@ class MSAwriter(object):
         #print 'in', gm.shape, 'out', new_gm.shape
         return new_gmt, new_gm
 
-    def readMSX(self, exp, shot, nfft, use_calibration=True):
+    def readMSX(self, exp, shot, nfft, use_calibration=True, downshiftPi=False):
+        if nfft > 2048:
+            warnings.warn('NFFT > 2048: Setting NFFT too high can harm calculation quality!')
         if use_calibration:
             # get latest calib factor (p0)
             MSC = dd.shotfile()
@@ -248,9 +250,15 @@ class MSAwriter(object):
             cmse = np.arctan2(calib_factor[ch]*I1*phadiff40, I2*phadiff46)*180./np.pi*0.5 # stokes polarimetry 0.5!
             cmse += faraday_degree[ch]*BTF(mset)
             cmse += b1
-
-            #mse.append(cmse if labels[ch] == 'sigma' else cmse-90) # todo: option to subtract value from either angle kind
-            mse.append(cmse)
+            #plt.title(ch+1)
+            #plt.plot(mset, (res40[0][i40[len(i40)/2]]-pha[i40[len(i40)/2]])%(2*np.pi), label='40 '+labels[ch])
+            #plt.plot(mset, (res46[0][i46[len(i40)/2]]-pha[i46[len(i40)/2]])%(2*np.pi), label='46 '+labels[ch])
+            #plt.legend()
+            #plt.show()
+            if downshiftPi:
+                mse.append(cmse if labels[ch] == 'sigma' else cmse-90) # todo: option to subtract value from either angle kind
+            else:
+                mse.append(cmse)
         # construct configuration object
         print 'generating geometric information from FARO (lib/mse2014.txt) and MSX/CH-SETUP...'
         rza = makeRzAs('lib/mse2014.txt')
@@ -273,7 +281,7 @@ class MSAwriter(object):
         print 'done'
         return (np.array(mset), np.array(mse).T, config)
 
-    def write(self, args, onlyNBI3=True, nfft=8192, showPlot=False, smooth_window=None):
+    def write(self, args, onlyNBI3=True, nfft=2048, showPlot=False, smooth_window=None):
         res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
         if res == False:
             return False
@@ -343,7 +351,7 @@ class MSAwriter(object):
 
         return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res)
 
-    def plot(self, what, args, nfft=8192, smooth_window=None):
+    def plot(self, what, args, nfft=2048, smooth_window=None):
         ax = plt.subplot(111)
         channels2use = args.only_channels
         if what=='MSA':
@@ -358,7 +366,7 @@ class MSAwriter(object):
             lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
             labels = ['Ch %i (pi)'%i for i in piCh] + ['Ch %i (sigma)'%i for i in sigCh]
         else:
-            res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
+            res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration, args.downshift_pi)
             if res == False:
                 return False
             gmt, gm, cfg = res
@@ -415,8 +423,11 @@ def main():
         help="don't remove data where wrong NBI configuration was present")
     parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
         help="only plot channels 1,2,5")
-    parser.add_argument('-nfft', type=int, default=2048,
-        help='FFT window length, e.g. -nfft 2048')
+    parser.add_argument('-dspi', '--downshift-pi', dest='downshift_pi', action='store_true', default=False,
+        help="shift pi lines down by 90deg")
+    #parser.add_argument('-nfft', type=int, default=2048,
+    #    help='FFT window length, e.g. -nfft 2048') # can destroy coherence in phase calculation when too long
+    nfft = 2048
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     
@@ -458,8 +469,8 @@ def main():
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
-        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, args.nfft, smooth_window=args.smooth_window))
-            or  (args.action == 'plotMSX' and writer.plot('MSX', args, args.nfft, smooth_window=args.smooth_window))):
+        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, nfft, smooth_window=args.smooth_window))
+            or  (args.action == 'plotMSX' and writer.plot('MSX', args, nfft, smooth_window=args.smooth_window))):
             print 'something went wrong :-('
             return False
     print 'okey-dokey'
