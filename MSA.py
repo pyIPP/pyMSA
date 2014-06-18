@@ -10,39 +10,53 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     import argparse
-    from pylab import specgram
+    from matplotlib.mlab import specgram
     from scipy.interpolate import interp1d
     import warnings
     import random
     import getpass
+    from IPython import embed
+    from lib.RzAmaker import makeRzAs
 except Exception, e:
-    print '(%s)'%e
-    print '''This program runs best on the Linux machines.
-Please execute the following commands to connect to one and
-load the necessary prerequisites:
+    print '    *** Error: %s'%e
+    print '''
+    This program runs best on the IPP Linux machines.
+    Please execute the following commands to connect to one and
+    load the necessary prerequisites:
 
-ssh qa01
-setenv PYTHONPATH /afs/ipp/aug/ads-diags/common/python/lib
-module load python27/basic
-./MSA.py -h
+    ssh qa01
+    setenv PYTHONPATH /afs/ipp/aug/ads-diags/common/python/lib
+    module load python27/basic
+    ./MSA.py -h
 
-to try again.
+    to try again.
 
-Otherwise contact abock or submit an issue at 
-https://github.com/pyIPP/pyMSA/issues'''
+    Otherwise contact abock or submit an issue at 
+    https://github.com/pyIPP/pyMSA/issues'''
     sys.exit()
 
-# unfinished work: better plotting colors
-#base = ['00', 'ff', '33']
-#colors = []
-#for a in base:
-#	for b in base:
-#		for c in base:
-#			colors.append('#%s%s%s'%(a, b, c))
-#random.shuffle(colors)		
-#mpl.rcParams['axes.color_cycle'] = colors
-#from matplotlib import cm
-#sys.exit()
+tmp = '''
+Black
+Red
+Maroon
+Olive
+Green
+Blue
+Navy
+Fuchsia
+Purple
+Lime
+Aqua
+Silver
+Gray
+Yellow
+Teal
+'''
+mpl.rcParams['axes.color_cycle'] = tmp.split()
+
+class Bunch(object):
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds)
 
 class MSAwriter(object):
     """Writes MSA shotfiles."""
@@ -57,6 +71,7 @@ class MSAwriter(object):
         if not src.Open('MSA', shot, experiment=exp):
             return False
 
+
         # load R Z A* dR dZ dZdR from old shotfile
         R    = src.GetObject('R').data
         Z    = src.GetObject('Z').data
@@ -68,7 +83,8 @@ class MSAwriter(object):
         A6   = src.GetObject('A6').data
         A7   = src.GetObject('A7').data
         A8   = src.GetObject('A8').data
-        A9   = src.GetObject('A9').data
+        A9   = src.GetObject('A9').data 
+        A10  = src.GetObject('A10').data 
         dR   = src.GetObject('dR').data
         dZ   = src.GetObject('dZ').data
         dZdR = src.GetObject('dZdR').data
@@ -84,24 +100,18 @@ class MSAwriter(object):
 
         vbeam = src.GetParameter('misc', 'v_beam')
 
-        toReturn = (R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, dR, dZ, dZdR,
-                    TMSA, gm, gm2, errgm, errgm2, vbeam)
+        pisigma = src.GetParameter('misc', 'pi/sigma')
+
+        toReturn = (R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, dR, dZ, dZdR,
+                    TMSA, gm, gm2, errgm, errgm2, vbeam, pisigma)
         # return False if something's missing
         return toReturn if None not in toReturn else False 
 
-    def writeMSA(self, exp, shot, data, RzAfile=None):
-        R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, dR, dZ, dZdR, \
-        TMSA, gm, gm2, errgm, errgm2, vbeam = data
+    def writeMSA(self, exp, shot, data):
+        R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, dR, dZ, dZdR, \
+        TMSA, gm, gm2, errgm, errgm2, vbeam, pisigma = data
 
-        # use new RzAs if filename given
-        if RzAfile != None:
-            lines = open(os.path.realpath(os.path.expanduser(RzAfile))).readlines()[1:]
-            for line in lines:
-                s = line.split()
-                ch, nR, nZ, nAs = int(s[0])-1, float(s[1]), float(s[2]), s[3:]
-                R[ch] = nR
-                Z[ch] = nZ
-                A1[ch], A2[ch], A3[ch], A4[ch], A5[ch], A6[ch], A7[ch], A8[ch], A9[ch] = nAs
+        # todo: allow other R z A from file
 
         dest = ww.shotfile()
         dest.Open(experiment=exp, diagnostic='MSA', shotnumber=shot)
@@ -122,6 +132,7 @@ class MSAwriter(object):
         dest.SetAreabase('A7', 1, A7.astype(np.float32))
         dest.SetAreabase('A8', 1, A8.astype(np.float32))
         dest.SetAreabase('A9', 1, A9.astype(np.float32))
+        dest.SetAreabase('A10', 1, A10.astype(np.float32))
         dest.SetAreabase('dR', 1, dR.astype(np.float32))
         dest.SetAreabase('dZ', 1, dZ.astype(np.float32))
         dest.SetAreabase('dZdR', 1, dZdR.astype(np.float32))
@@ -131,6 +142,8 @@ class MSAwriter(object):
         dest.SetSignalGroup('err_g_m', errgm.astype(np.float32))
         dest.SetSignalGroup('err_g_m2', errgm2.astype(np.float32))
         dest.SetParameter('misc', 'v_beam', np.float32(vbeam))
+        dest.SetParameter('misc', 'pi/sigma', pisigma)
+
         dest.Close()
         return True
 
@@ -199,7 +212,7 @@ class MSAwriter(object):
         for ch in range(self.n_chan):
             print '%2i/%2i' %(ch+1, self.n_chan)
             res = specgram(sg1[:,ch], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2)
-            plt.clf() # specgram produces a plot, throw it away
+            #plt.clf() # specgram produces a plot, throw it away
             
             I = np.array(res[0])
             f = res[1]
@@ -216,20 +229,33 @@ class MSAwriter(object):
             cmse += b1
             #print faraday_degree[ch], BTF(0.), b1
             mse.append(cmse-90)
+        # construct configuration object
+        print 'generating geometric information from FARO (lib/mse2014.txt) and MSX/CH-SETUP...'
+        rza = makeRzAs('lib/mse2014.txt')
+        ps = ['pi' if x == 1 else 'sigma' if x == 2 else None for x in src.GetParameter('CH-SETUP', 'PI/SIGMA')]
+        los = np.array([src.GetParameter('CH-SETUP', 'LOS-L%i'%i) for i in xrange(1,7)]).ravel()
+        nchan = len(ps) - ps.count(None)
+        R = np.zeros(nchan); dR = np.zeros(nchan)
+        Z = np.zeros(nchan); dZ = np.zeros(nchan)
+        A = np.zeros((nchan,10))
+        for i in xrange(10):
+            R[i] = np.average(rza.R[np.where(los == i + 1)])
+            dR[i] = np.std(rza.R[np.where(los == i + 1)])
+            Z[i] = np.average(rza.z[np.where(los == i + 1)])
+            dZ[i] = np.std(rza.z[np.where(los == i + 1)])
+            A[i] = np.average(rza.Asigma[np.where(los == i + 1)], axis=0) if ps[i] == 'sigma' else \
+                   np.average(rza.Api[np.where(los == i + 1)], axis=0)
 
-
-        return (np.array(mset), np.array(mse).T)
+        config = Bunch(R=R, z=Z, A=A, pisigma=src.GetParameter('CH-SETUP', 'PI/SIGMA')[:nchan],
+            dR=dR, dZ=dZ)
+        print 'done'
+        return (np.array(mset), np.array(mse).T, config)
 
     def write(self, args, onlyNBI3=True, nfft=8192, showPlot=False, smooth_window=None):
-
-        if args.RzA_file == None:
-            raise Exception("no RzAfile given. aborting write process. Please specify one with -rza argument.")
-            return False
-
         res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
         if res == False:
             return False
-        gmt, gm = res
+        gmt, gm, cfg = res
 
         if args.channel_order != None:
             gm = gm[:, args.channel_order]
@@ -263,83 +289,80 @@ class MSAwriter(object):
             plt.plot(gmt, gm)
             plt.show()
 
-        # get latest AUGD MSA file as a template
-        latestMSA = self.latestMSAfile(args.src_num, 'AUGD')
-        if latestMSA == 0:
-            warnings.warn("No AUGD:MSA file found for %i, using 29000 instead."%args.src_num)
-            latestMSA = 29000
-        res = self.readMSA('AUGD', latestMSA)
-        if res == False:
-            return False
-        res = list(res)
+        res = [None]*22
 
-        # warning: this code was taken from mse_class, but is wrong.
         # now set v_beam:
-        #t0 = gmt.min()
-        #t1 = gmt.max()
-        #nis = dd.shotfile()
-        #nis.Open('NIS', args.src_num)
-        #pniq = nis.GetSignalGroup('PNIQ')
-        #pniqt = nis.GetTimebase('PNIQ')
-        #index0 = np.abs(pniqt-t0).argmin()
-        #index1 = np.abs(pniqt-t1).argmin()
-        #vbeam = 0 #np.average(pniq[index0:index1+1, 2, 0])
-        
-        # self calculation instead:
         NIS = dd.shotfile()
         if not NIS.Open('NIS', args.src_num):
             return False
         vbeam = np.sqrt(2*NIS.GetParameter('INJ1', 'UEXQ')[2]*1e3*1.602e-19 / 3.344e-27) # in m/s
+        res[0] = cfg.R
+        res[1] = cfg.z
+        res[2] = cfg.A[:,0]
+        res[3] = cfg.A[:,1]
+        res[4] = cfg.A[:,2]
+        res[5] = cfg.A[:,3]
+        res[6] = cfg.A[:,4]
+        res[7] = cfg.A[:,5]
+        res[8] = cfg.A[:,6]
+        res[9] = cfg.A[:,7]
+        res[10] = cfg.A[:,8]
+        res[11] = cfg.A[:,9]
+        res[12] = cfg.dR
+        res[13] = cfg.dZ
+        res[14] = np.array([0.]*10)
+        res[15] = gmt # TMSA
+        res[16] = gm # gm
+        res[17] = gm*0. # gm2
+        res[18] = gm*0 + 0.2 # errgm
+        res[19] = gm*0 + 180. # errgm2
+        res[20] = vbeam # vbeam
+        res[21] = cfg.pisigma #pisigma
 
-        res[14] = gmt # TMSA
-        res[15] = gm # gm
-        res[16] = gm*0. # gm2
-        res[17] = gm*0 + 0.2 # errgm
-        res[18] = gm*0 + 180. # errgm2
-        res[19] = vbeam # vbeam
-
-        return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res, RzAfile=args.RzA_file)
+        return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res)
 
     def plot(self, what, args, nfft=8192, smooth_window=None):
+        ax = plt.subplot(111)
+        channels2use = args.only_channels
         if what=='MSA':
             res = self.readMSA(args.src_exp, args.src_num)
+            piCh = np.intersect1d(np.where(res[21]==1)[0], channels2use)
+            sigCh = np.intersect1d(np.where(res[21]==2)[0], channels2use)
             if res == False:
                 return False
-
-            channels2use = args.only_channels
-
-            gmt, gm = res[14:16]
+            gmt, gm = res[15:17]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
-            plt.plot(gmt, gm[:, channels2use])
-            plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
-            plt.show()
+            lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
+            labels = ['Ch %i (pi)'%i for i in piCh] + ['Ch %i (sigma)'%i for i in sigCh]
         else:
             res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
             if res == False:
                 return False
-            gmt, gm = res
+            gmt, gm, cfg = res
             if args.channel_order != None:
                 gm = gm[:, args.channel_order]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
-            
-            channels2use = args.only_channels
+            piCh = np.intersect1d(np.where(cfg.pisigma==1)[0], channels2use)
+            sigCh = np.intersect1d(np.where(cfg.pisigma==2)[0], channels2use)
+            lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
+            labels = ['Ch %i (pi)'%i for i in piCh] + ['Ch %i (sigma)'%i for i in sigCh]
 
-            ax = plt.subplot(111)
-            lineObjects = plt.plot(gmt, gm[:,channels2use])
-            plt.legend(lineObjects, ['ch %i'%(i+1) for i in channels2use], fontsize=8)
-            plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
-            plt.xlabel('t [s]')
-            plt.ylabel('g_m [deg]')
-            
-            from matplotlib.ticker import MultipleLocator
-            ax.xaxis.set_minor_locator(MultipleLocator(0.5))
-            ax.yaxis.set_minor_locator(MultipleLocator(0.2))
-            
-            plt.grid(True, 'both')
-            
-            plt.show()
+        leg = plt.legend(lineObjects, [l for l in labels], fontsize=10)
+        for legobj in leg.legendHandles:
+            legobj.set_linewidth(2.0)
+        plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
+        plt.xlabel('t [s]')
+        plt.ylabel('g_m [deg]')
+        
+        from matplotlib.ticker import MultipleLocator
+        ax.xaxis.set_minor_locator(MultipleLocator(0.5))
+        ax.yaxis.set_minor_locator(MultipleLocator(0.2))
+        
+        plt.grid(True, 'both')
+        
+        plt.show()
         return True
 
     def replicate(self, args):
@@ -348,7 +371,7 @@ class MSAwriter(object):
         res = self.readMSA(args.src_exp, args.src_num)
         if res == False:
             return False
-        return self.writeMSA(args.dest_exp, args.dest_num, res, RzAfile=args.RzA_file)
+        return self.writeMSA(args.dest_exp, args.dest_num, res)
 
 def main():
     possibleActions = ['replicate','write', 'plotMSA', 'plotMSX']
@@ -364,8 +387,6 @@ def main():
         help='destination experiment, e.g. -de ABOCK')
     parser.add_argument('-dn', '--dest-num', type=int, default=None,
         help='destination shotnumber, e.g. -dn 123')
-    parser.add_argument('-rza', '--RzA-file', type=str, default=None,
-        help='optional file with new R,Z,A numbers, e.g. -rza RzAs2014b.txt')
     parser.add_argument('-nc', '--no-calibration', dest='use_calibration', action='store_false', default=True,
         help="don't load calibration from MSC, use average hardcoded values instead")
     parser.add_argument('-i124', '--ignore-NBI124', dest='ignore_NBI124', action='store_true', default=False,
@@ -374,8 +395,8 @@ def main():
         help="only plot channels 1,2,5")
     parser.add_argument('-nfft', type=int, default=2048,
         help='FFT window length, e.g. -nfft 2048')
-    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,9,8,10',
-        help='reorder channels, e.g. by default "-co 1,2,3,4,5,6,7,9,8,10"')
+    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
+        help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     
     parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
         help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
