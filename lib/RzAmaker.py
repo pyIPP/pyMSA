@@ -47,7 +47,7 @@ def makeRzAs(mseFaroFile='mse2014.txt', plot=False, beamSubdivisionLength=1e-3):
     vd = (vdx**2+vdy**2+vdz**2)**0.5 / nbiBeamLength
     # use original inner point and another point inside plasma
     Q3c[:] = Q3c[1], Q3c[1] + np.array([vdx/vd, vdy/vd, vdz/vd])
-    embed()
+
     if plot:
         from mayavi import mlab
         mlab.plot3d(Q3c[:,0], Q3c[:,1], Q3c[:,2], color=(0,1,0))
