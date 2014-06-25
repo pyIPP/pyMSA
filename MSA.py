@@ -7,6 +7,8 @@ try:
     import os, sys
     import numpy as np
     import dd_20140409 as dd, ww_20140403 as ww
+    # modified mpl necessary
+    sys.path.insert(1, '/afs/ipp/home/a/abock/lib/python2.7/site-packages/matplotlib-1.3.1-py2.7-linux-x86_64.egg') 
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     import argparse
@@ -38,13 +40,13 @@ except Exception, e:
 tmp = '''
 Black
 Red
-Maroon
-Olive
-Green
 Blue
 Navy
 Fuchsia
 Purple
+Maroon
+Olive
+Green
 Lime
 Aqua
 Silver
@@ -60,9 +62,7 @@ class Bunch(object):
 
 class MSAwriter(object):
     """Writes MSA shotfiles."""
-    
-    n_chan = 10
-    
+        
     def __init__(self):
         super(MSAwriter, self).__init__()
 
@@ -167,9 +167,49 @@ class MSAwriter(object):
         #print 'in', gm.shape, 'out', new_gm.shape
         return new_gmt, new_gm
 
-    def readMSX(self, exp, shot, nfft, use_calibration=True, downshiftPi=False):
-        if nfft > 2048:
-            warnings.warn('NFFT > 2048: Setting NFFT too high can harm calculation quality!')
+    pem40a, pem46a = None, None
+
+    def _angleFromRawData(self, t, data, pem40, pem46, 
+                          calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
+                          nfft=2048, plot=False):
+        t0, dt = t[0], t[1] - t[0]
+        if self.pem40a == None or self.pem46a == None: # do only once, then cache
+            self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
+            self.pem46a = specgram(pem46, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
+
+        I, f, t = specgram(data, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='default')
+        a, f, t = specgram(data, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')
+        t += t0
+
+        # 40-41 kHz, 46-47 kHz are the PEM harmonics we are interested in
+        i40s = np.intersect1d(np.where(40e3 < f)[0], np.where(f < 41e3)[0])
+        i46s = np.intersect1d(np.where(46e3 < f)[0], np.where(f < 47e3)[0])
+
+        # indices of frequencies with maximum intensity
+        i40 = i40s[np.average(I[i40s], axis=1).argmax()]
+        i46 = i46s[np.average(I[i46s], axis=1).argmax()]
+
+        # use phase difference between pem reference signal and measured signal for intensity sign information
+        adiff40 = ((a[i40]-self.pem40a[i40])%(2*np.pi) > np.pi).astype(int)*2-1
+        adiff46 = ((a[i46]-self.pem46a[i46])%(2*np.pi) > np.pi).astype(int)*2-1
+
+        # use sign from previous lines to create "negative" intensities for full arctan2 usage
+        I40 = np.sum(I[i40s], axis=0)**0.5 * adiff40
+        I46 = np.sum(I[i46s], axis=0)**0.5 * adiff46
+
+        if plot:
+            plt.plot(t, I40)
+            plt.plot(t, I46)
+            plt.show()
+
+        toReturn = -np.arctan2(calib_factor*I40, I46)*180./np.pi*0.5 # second stokes component, thus *0.5
+        toReturn += faraday_strength*btf(t) + abs_offset
+        toReturn[np.where(toReturn >  90)] -= 180
+        toReturn[np.where(toReturn < -90)] += 180
+        
+        return t, toReturn
+
+    def readMSX(self, exp, shot, nfft, use_calibration=True, upshiftPi=False):
         if use_calibration:
             # get latest calib factor (p0)
             MSC = dd.shotfile()
@@ -209,77 +249,103 @@ class MSAwriter(object):
         if not src.Open('MSX', shot, exp):
             return False
         sg1 = src.GetSignalGroup('SG-1')
+        sg2 = src.GetSignalGroup('SG-2')
         sg1t = src.GetTimebase('SG-1')/1e9 # nanoseconds...
-        mse = []
+
+        mse = [] # result
 
         # reference signals from PEMs
-        res40 = specgram(sg1[:,15], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2, mode='angle')
-        res46 = specgram(sg1[:,14], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2, mode='angle')
+        pem40, pem46 = sg1[:,15], sg1[:,14]
 
-        labels = src.GetParameter('CH-SETUP', 'PI/SIGMA')
-        labels = ['pi' if l == 1 else 'sigma' for l in labels]
+        labels = ['pi' if l == 1 else 'sigma' if l != 0 else '' for l in src.GetParameter('CH-SETUP', 'PI/SIGMA')]
+        nchan = len(labels) - labels.count('')
 
-        for ch in range(self.n_chan):
-            print '%2i/%2i' %(ch+1, self.n_chan)
-            res = specgram(sg1[:,ch], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2)
-            res2 = specgram(sg1[:,ch], NFFT=nfft, Fs=1./(sg1t[1]-sg1t[0]), noverlap=nfft/2, mode='angle')
-            pha = np.array(res2[0])
-            #plt.clf() # specgram produces a plot, throw it away
+        # function to get data corresponding to MSA g_m entry <channel>        
+        channelmap = [
+            ('SG-1', 0, 'MSE  1'), # MSE box 1
+            ('SG-1', 1, 'MSE  2'),
+            ('SG-1', 2, 'MSE  3'),
+            ('SG-1', 3, 'MSE  4'),
+            ('SG-1', 4, 'MSE  5'),
+            ('SG-1', 5, 'MSE  6'),
+            ('SG-1', 6, 'MSE  7'),
+            ('SG-1', 7, 'MSE  8'),
+            ('SG-1', 8, 'MSE  9'),
+            ('SG-1', 9, 'MSE 10'), # MSE box 10
+            ('SG-2', 0, 'MER  1'), # MER box 1
+            ('SG-2', 6, 'MER  2'), # MER box 2
+        ]
+        def getActualBox(channel, labels=np.array(labels)):
+            return np.where(labels != '')[0][channel]
+        def getData(channel, channelmap=channelmap):
+            actualIndex = getActualBox(channel)
+            group, index, l = channelmap[actualIndex]
+            #print group, index
+            return sg1[:,index] if group == 'SG-1' else sg2[:,index]
+
+        for ch in range(nchan):
+            print '%2i/%2i' %(ch+1, nchan)
+            data = getData(ch)
+
+            mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
+                                                calib_factor[getActualBox(ch)],
+                                                faraday_degree[getActualBox(ch)],
+                                                BTF,
+                                                b1,
+                                                nfft=2048)
             
-            I = np.array(res[0])
-            f = res[1]
-            mset = res[2] + sg1t[0]
-            
-            i40 = np.intersect1d(np.where(40e3 < f)[0], np.where(f < 41e3)[0])
-            i46 = np.intersect1d(np.where(46e3 < f)[0], np.where(f < 47e3)[0])
-
-            I1 = np.sum(I[i40], axis=0)**0.5
-            I2 = np.sum(I[i46], axis=0)**0.5
-
-            # Single phase lock-in will get polarimetry phase automatically.
-            # Fourier approach needs manual reconstruction.
-            # Normally: 90deg rotation from full positive lock-in output = full negative lock-in output
-            # Here: compare phases from spectrogram with reference phases from PEMs
-            # reconstruct negative amplitudes by generating a vector filled with +-1
-            # step 1: subtract phases from each other, map into 0..2pi
-            # step 2: convert parts > pi and < pi as necessary to 0 and 1, multiply by 2, subtract 1
-            # => vector with +1's and -1's according to phase relation at that time point
-            phadiff40 = ((res40[0][i40[len(i40)/2]]-pha[i40[len(i40)/2]])%(2*np.pi) > np.pi).astype(int)*2-1
-            phadiff46 = ((res46[0][i46[len(i40)/2]]-pha[i46[len(i40)/2]])%(2*np.pi) < np.pi).astype(int)*2-1
-
-            cmse = np.arctan2(calib_factor[ch]*I1*phadiff40, I2*phadiff46)*180./np.pi*0.5 # stokes polarimetry 0.5!
-            cmse += faraday_degree[ch]*BTF(mset)
-            cmse += b1
-            #plt.title(ch+1)
-            #plt.plot(mset, (res40[0][i40[len(i40)/2]]-pha[i40[len(i40)/2]])%(2*np.pi), label='40 '+labels[ch])
-            #plt.plot(mset, (res46[0][i46[len(i40)/2]]-pha[i46[len(i40)/2]])%(2*np.pi), label='46 '+labels[ch])
-            #plt.legend()
-            #plt.show()
-            if downshiftPi:
-                mse.append(cmse if labels[ch] == 'sigma' else cmse-90) # todo: option to subtract value from either angle kind
+            if upshiftPi:
+                mse.append(cmse if labels[getActualBox(ch)] == 'sigma' else cmse+90)
             else:
                 mse.append(cmse)
+
         # construct configuration object
         print 'generating geometric information from FARO (lib/mse2014.txt) and MSX/CH-SETUP...'
         rza = makeRzAs('lib/mse2014.txt')
-        ps = ['pi' if x == 1 else 'sigma' if x == 2 else None for x in src.GetParameter('CH-SETUP', 'PI/SIGMA')]
         los = np.array([src.GetParameter('CH-SETUP', 'LOS-L%i'%i) for i in xrange(1,7)]).ravel()
-        nchan = len(ps) - ps.count(None)
         R = np.zeros(nchan); dR = np.zeros(nchan)
         Z = np.zeros(nchan); dZ = np.zeros(nchan)
         A = np.zeros((nchan,10))
-        for i in xrange(10):
-            R[i] = np.average(rza.R[np.where(los == i + 1)])
-            dR[i] = np.std(rza.R[np.where(los == i + 1)])
-            Z[i] = np.average(rza.z[np.where(los == i + 1)])
-            dZ[i] = np.std(rza.z[np.where(los == i + 1)])
-            A[i] = np.average(rza.Asigma[np.where(los == i + 1)], axis=0) if ps[i] == 'sigma' else \
-                   np.average(rza.Api[np.where(los == i + 1)], axis=0)
-
-        config = Bunch(R=R, z=Z, A=A, pisigma=src.GetParameter('CH-SETUP', 'PI/SIGMA')[:nchan],
-            dR=dR, dZ=dZ)
+        for i in xrange(nchan):
+            R[i] = np.average(rza.R[np.where(los == getActualBox(i) + 1)])
+            dR[i] = np.std(rza.R[np.where(los == getActualBox(i) + 1)])
+            Z[i] = np.average(rza.z[np.where(los == getActualBox(i) + 1)])
+            dZ[i] = np.std(rza.z[np.where(los == getActualBox(i) + 1)])
+            A[i] = np.average(rza.Asigma[np.where(los == getActualBox(i) + 1)], axis=0) if labels[getActualBox(i)] == 'sigma' else \
+                   np.average(rza.Api[   np.where(los == getActualBox(i) + 1)], axis=0)
+        pisigma = src.GetParameter('CH-SETUP', 'PI/SIGMA')
+        pisigma = pisigma[np.where(pisigma != 0)[0]]
+        config = Bunch(R=R, z=Z, A=A, pisigma=pisigma, dR=dR, dZ=dZ,
+            labels=['%s %s'%(channelmap[getActualBox(i)][2], 'pi' if pisigma[i] == 1 else 'sigma') for i in xrange(10)])
         print 'done'
+        #embed()
         return (np.array(mset), np.array(mse).T, config)
+
+    def getIndicesIncompatibleWithNBI(self, shot, t):
+        NIS = dd.shotfile()
+        if not NIS.Open('NIS', shot):
+            return []
+        p = NIS.GetSignalGroup('PNIQ')[:, :, 0]
+        pt = NIS.GetTimebase('PNIQ')        
+        # only timepoints where NBI3 > 1MW and rest at 0
+        ind = np.intersect1d(np.where(p[:, 2] > 1000e3)[0], np.where(p[:, 0] == 0)[0])
+        ind = np.intersect1d(ind, np.where(p[:, 1] == 0)[0])
+        ind = np.intersect1d(ind, np.where(p[:, 3] == 0)[0])
+        dt = pt[1]-pt[0] # use time between two NBI data points as limit
+        pt = pt[ind]
+        toRemove = []
+        for i in range(len(t)):
+            ddt = np.abs(t[i]-pt).min()
+            if ddt > dt:
+                toRemove.append(i)
+        return toRemove
+
+    def removeIncompatibleNBItimes(self, shot, t, gm):
+        # remove items where NBI1,2,4 were on/NBI3 off
+        toRemove = self.getIndicesIncompatibleWithNBI(shot, t)
+        gm = np.delete(gm, toRemove, axis=0)
+        t = np.delete(t, toRemove)
+        return t, gm
 
     def write(self, args, onlyNBI3=True, nfft=2048, showPlot=False, smooth_window=None):
         res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
@@ -294,25 +360,7 @@ class MSAwriter(object):
             gmt, gm = self.smooth(gmt, gm, smooth_window)
 
         if onlyNBI3:
-            # remove items where NBI1,2,4 were on/NBI3 off
-            NIS = dd.shotfile()
-            if not NIS.Open('NIS', args.src_num):
-                return False
-            p = NIS.GetSignalGroup('PNIQ')[:, :, 0]
-            pt = NIS.GetTimebase('PNIQ')        
-            # only timepoints where NBI3 > 1MW and rest at 0
-            ind = np.intersect1d(np.where(p[:, 2] > 1000e3)[0], np.where(p[:, 0] == 0)[0])
-            ind = np.intersect1d(ind, np.where(p[:, 1] == 0)[0])
-            ind = np.intersect1d(ind, np.where(p[:, 3] == 0)[0])
-            dt = pt[1]-pt[0] # use time between two NBI data points as limit
-            pt = pt[ind]
-            toRemove = []
-            for i in range(len(gmt)):
-                ddt = np.abs(gmt[i]-pt).min()
-                if ddt > dt:
-                    toRemove.append(i)
-            gm = np.delete(gm, toRemove, axis=0)
-            gmt = np.delete(gmt, toRemove)
+            gmt, gm = self.removeIncompatibleNBItimes(shot, gmt, gm)
 
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
@@ -364,9 +412,9 @@ class MSAwriter(object):
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
             lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
-            labels = ['Ch %i (pi)'%i for i in piCh] + ['Ch %i (sigma)'%i for i in sigCh]
+            labels = ['Ch %i (pi)'%(i+1) for i in piCh] + ['Ch %i (sigma)'%(i+1) for i in sigCh]
         else:
-            res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration, args.downshift_pi)
+            res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration, args.upshift_pi)
             if res == False:
                 return False
             gmt, gm, cfg = res
@@ -374,10 +422,13 @@ class MSAwriter(object):
                 gm = gm[:, args.channel_order]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
-            piCh = np.intersect1d(np.where(cfg.pisigma==1)[0], channels2use)
-            sigCh = np.intersect1d(np.where(cfg.pisigma==2)[0], channels2use)
-            lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
-            labels = ['Ch %i (pi)'%i for i in piCh] + ['Ch %i (sigma)'%i for i in sigCh]
+            #piCh = np.intersect1d(np.where(cfg.pisigma==1)[0], channels2use)
+            #sigCh = np.intersect1d(np.where(cfg.pisigma==2)[0], channels2use)
+            #lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
+            #labels = ['Ch %i (pi)'%(i+1) for i in piCh] + ['Ch %i (sigma)'%(i+1) for i in sigCh]
+            lineObjects = plt.plot(gmt, gm)
+            labels = cfg.labels
+            
 
         leg = plt.legend(lineObjects, [l for l in labels], fontsize=10)
         for legobj in leg.legendHandles:
@@ -388,10 +439,18 @@ class MSAwriter(object):
         
         from matplotlib.ticker import MultipleLocator
         ax.xaxis.set_minor_locator(MultipleLocator(0.5))
-        ax.yaxis.set_minor_locator(MultipleLocator(0.2))
+        ax.yaxis.set_minor_locator(MultipleLocator(0.4))
         
         plt.grid(True, 'both')
         
+        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt)
+        upper = np.zeros(len(gmt))
+        lower = np.zeros(len(gmt))
+        ax = plt.gca()
+        upper[badind] = max(ax.get_ylim())
+        lower[badind] = min(ax.get_ylim())
+        plt.fill_between(gmt, upper, lower, color='r', alpha=0.2)
+
         plt.show()
         return True
 
@@ -423,10 +482,10 @@ def main():
         help="don't remove data where wrong NBI configuration was present")
     parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
         help="only plot channels 1,2,5")
-    parser.add_argument('-dspi', '--downshift-pi', dest='downshift_pi', action='store_true', default=False,
-        help="shift pi lines down by 90deg")
+    parser.add_argument('-up', '--upshift-pi', dest='upshift_pi', action='store_true', default=False,
+        help="shift pi lines up by 90deg")
     #parser.add_argument('-nfft', type=int, default=2048,
-    #    help='FFT window length, e.g. -nfft 2048') # can destroy coherence in phase calculation when too long
+    #    help='FFT window length, e.g. -nfft 2048') # can destroy coherence in phase calculation, careful when choosing other values
     nfft = 2048
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
@@ -473,7 +532,6 @@ def main():
             or  (args.action == 'plotMSX' and writer.plot('MSX', args, nfft, smooth_window=args.smooth_window))):
             print 'something went wrong :-('
             return False
-    print 'okey-dokey'
     return True
     
 
