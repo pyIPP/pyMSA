@@ -8,7 +8,8 @@ try:
     import numpy as np
     import dd_20140409 as dd, ww_20140403 as ww
     # modified mpl necessary
-    sys.path.insert(1, '/afs/ipp/home/a/abock/lib/python2.7/site-packages/matplotlib-1.3.1-py2.7-linux-x86_64.egg') 
+    import site
+    site.addsitedir('/afs/ipp/u/abock/lib/python2.7/site-packages/')
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     import argparse
@@ -21,14 +22,15 @@ try:
     from lib.RzAmaker import makeRzAs
 except Exception, e:
     print '    *** Error: %s'%e
-    print '''
+    print ''' 
     This program runs best on the IPP Linux machines.
     Please execute the following commands to connect to one and
     load the necessary prerequisites:
 
     ssh qa01
     setenv PYTHONPATH /afs/ipp/aug/ads-diags/common/python/lib
-    module load python27/basic
+    module load intel python27/basic
+    module switch intel/14.0
     ./MSA.py -h
 
     to try again.
