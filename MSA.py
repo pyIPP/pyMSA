@@ -167,11 +167,14 @@ class MSAwriter(object):
         #print 'in', gm.shape, 'out', new_gm.shape
         return new_gmt, new_gm
 
+    def onlyPlusMinus90(self, gm):
+        return (gm+90)%180-90
+
     pem40a, pem46a = None, None
 
     def _angleFromRawData(self, t, data, pem40, pem46, 
                           calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
-                          nfft=2048, plot=False):
+                          nfft=2048, shiftby=0, plot=False):
         t0, dt = t[0], t[1] - t[0]
         if self.pem40a == None or self.pem46a == None: # do only once, then cache
             self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
@@ -204,10 +207,12 @@ class MSAwriter(object):
 
         toReturn = -np.arctan2(calib_factor*I40, I46)*180./np.pi*0.5 # second stokes component, thus *0.5
         toReturn += faraday_strength*btf(t) + abs_offset
-        toReturn[np.where(toReturn >  90)] -= 180
-        toReturn[np.where(toReturn < -90)] += 180
+        #toReturn = (toReturn+90)%180-90 # only [-90,+90] please
+        #if 
+        #toReturn[np.where(toReturn >  90)] -= 180
+        #toReturn[np.where(toReturn < -90)] += 180
         
-        return t, toReturn
+        return t, toReturn + shiftby
 
     def readMSX(self, exp, shot, nfft, use_calibration=True, upshiftPi=False):
         if use_calibration:
@@ -292,12 +297,10 @@ class MSAwriter(object):
                                                 faraday_degree[getActualBox(ch)],
                                                 BTF,
                                                 b1,
-                                                nfft=2048)
+                                                nfft=2048,
+                                                shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0)
             
-            if upshiftPi:
-                mse.append(cmse if labels[getActualBox(ch)] == 'sigma' else cmse+90)
-            else:
-                mse.append(cmse)
+            mse.append(cmse)
 
         # construct configuration object
         print 'generating geometric information from FARO (lib/mse2014.txt) and MSX/CH-SETUP...'
@@ -358,6 +361,8 @@ class MSAwriter(object):
 
         if smooth_window != None:
             gmt, gm = self.smooth(gmt, gm, smooth_window)
+
+        gm = self.onlyPlusMinus90(gm)
 
         if onlyNBI3:
             gmt, gm = self.removeIncompatibleNBItimes(shot, gmt, gm)
@@ -422,10 +427,7 @@ class MSAwriter(object):
                 gm = gm[:, args.channel_order]
             if smooth_window != None:
                 gmt, gm = self.smooth(gmt, gm, smooth_window)
-            #piCh = np.intersect1d(np.where(cfg.pisigma==1)[0], channels2use)
-            #sigCh = np.intersect1d(np.where(cfg.pisigma==2)[0], channels2use)
-            #lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
-            #labels = ['Ch %i (pi)'%(i+1) for i in piCh] + ['Ch %i (sigma)'%(i+1) for i in sigCh]
+            gm = self.onlyPlusMinus90(gm)
             lineObjects = plt.plot(gmt, gm)
             labels = cfg.labels
             
@@ -443,12 +445,11 @@ class MSAwriter(object):
         
         plt.grid(True, 'both')
         
-        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt)
-        upper = np.zeros(len(gmt))
-        lower = np.zeros(len(gmt))
         ax = plt.gca()
+        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt)
+        upper = np.ones(len(gmt))*min(ax.get_ylim())
+        lower = np.ones(len(gmt))*min(ax.get_ylim())
         upper[badind] = max(ax.get_ylim())
-        lower[badind] = min(ax.get_ylim())
         plt.fill_between(gmt, upper, lower, color='r', alpha=0.2)
 
         plt.show()
