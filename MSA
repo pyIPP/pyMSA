@@ -112,41 +112,49 @@ class MSAwriter(object):
     def writeMSA(self, exp, shot, data):
         R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, dR, dZ, dZdR, \
         TMSA, gm, gm2, errgm, errgm2, vbeam, pisigma = data
+        
+        oldcwd = os.getcwd()
+        if os.path.dirname(os.path.realpath(__file__)) != oldcwd:
+            os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
-        # todo: allow other R z A from file
+        try:
+            dest = ww.shotfile()
+            dest.Open(experiment=exp, diagnostic='MSA', shotnumber=shot)
+            #if not (dest.SetAreabase('R',  1, R) # old ww version has no feedback when writing...  
+            #    and dest.SetAreabase('Z',  1, Z) # update when ww is updated
+            #    ...
+            #    and dest.SetParameter('misc', 'v_beam', vbeam)):
+            #   dest.Close()
+            #   return False
+            dest.SetAreabase('R',  1, R.astype(np.float32))
+            dest.SetAreabase('Z',  1, Z.astype(np.float32))
+            dest.SetAreabase('A1', 1, A1.astype(np.float32))
+            dest.SetAreabase('A2', 1, A2.astype(np.float32))
+            dest.SetAreabase('A3', 1, A3.astype(np.float32))
+            dest.SetAreabase('A4', 1, A4.astype(np.float32))
+            dest.SetAreabase('A5', 1, A5.astype(np.float32))
+            dest.SetAreabase('A6', 1, A6.astype(np.float32))
+            dest.SetAreabase('A7', 1, A7.astype(np.float32))
+            dest.SetAreabase('A8', 1, A8.astype(np.float32))
+            dest.SetAreabase('A9', 1, A9.astype(np.float32))
+            dest.SetAreabase('A10', 1, A10.astype(np.float32))
+            dest.SetAreabase('dR', 1, dR.astype(np.float32))
+            dest.SetAreabase('dZ', 1, dZ.astype(np.float32))
+            dest.SetAreabase('dZdR', 1, dZdR.astype(np.float32))
+            dest.SetTimebase('T-MSA', TMSA.astype(np.float32))
+            dest.SetSignalGroup('g_m', gm.astype(np.float32))
+            dest.SetSignalGroup('g_m2', gm2.astype(np.float32))
+            dest.SetSignalGroup('err_g_m', errgm.astype(np.float32))
+            dest.SetSignalGroup('err_g_m2', errgm2.astype(np.float32))
+            dest.SetParameter('misc', 'v_beam', np.float32(vbeam))
+            dest.SetParameter('misc', 'pi/sigma', pisigma)
 
-        dest = ww.shotfile()
-        dest.Open(experiment=exp, diagnostic='MSA', shotnumber=shot)
-        #if not (dest.SetAreabase('R',  1, R) # old ww version has no feedback when writing...  
-        #    and dest.SetAreabase('Z',  1, Z) # update when ww is updated
-        #    ...
-        #    and dest.SetParameter('misc', 'v_beam', vbeam)):
-        #   dest.Close()
-        #   return False
-        dest.SetAreabase('R',  1, R.astype(np.float32))
-        dest.SetAreabase('Z',  1, Z.astype(np.float32))
-        dest.SetAreabase('A1', 1, A1.astype(np.float32))
-        dest.SetAreabase('A2', 1, A2.astype(np.float32))
-        dest.SetAreabase('A3', 1, A3.astype(np.float32))
-        dest.SetAreabase('A4', 1, A4.astype(np.float32))
-        dest.SetAreabase('A5', 1, A5.astype(np.float32))
-        dest.SetAreabase('A6', 1, A6.astype(np.float32))
-        dest.SetAreabase('A7', 1, A7.astype(np.float32))
-        dest.SetAreabase('A8', 1, A8.astype(np.float32))
-        dest.SetAreabase('A9', 1, A9.astype(np.float32))
-        dest.SetAreabase('A10', 1, A10.astype(np.float32))
-        dest.SetAreabase('dR', 1, dR.astype(np.float32))
-        dest.SetAreabase('dZ', 1, dZ.astype(np.float32))
-        dest.SetAreabase('dZdR', 1, dZdR.astype(np.float32))
-        dest.SetTimebase('T-MSA', TMSA.astype(np.float32))
-        dest.SetSignalGroup('g_m', gm.astype(np.float32))
-        dest.SetSignalGroup('g_m2', gm2.astype(np.float32))
-        dest.SetSignalGroup('err_g_m', errgm.astype(np.float32))
-        dest.SetSignalGroup('err_g_m2', errgm2.astype(np.float32))
-        dest.SetParameter('misc', 'v_beam', np.float32(vbeam))
-        dest.SetParameter('misc', 'pi/sigma', pisigma)
+            dest.Close()
+        except Exception, e:
+            raise e
+        finally:
+            os.chdir(oldcwd)
 
-        dest.Close()
         return True
 
     def latestMSAfile(self, shot=0, exp='AUGD'):
@@ -216,8 +224,21 @@ class MSAwriter(object):
         
         return t, toReturn + shiftby
 
-    def readMSX(self, exp, shot, nfft, use_calibration=True, upshiftPi=False):
-        if use_calibration:
+    def readChannelSetupFile(self, file):
+        with open(file) as f:
+            lines = f.readlines()
+            pisigma = np.array(lines[0].split(), dtype=int)
+            los = np.array([np.array(lines[i].split(), dtype=int) for i in xrange(1,7)]).ravel()
+        return pisigma, los
+
+    def readMSX(self, args):
+        exp = args.src_exp
+        shot = args.src_num
+        useCalibration=args.use_calibration
+        upshiftPi=args.upshift_pi
+        channelSetupFile=args.chs_file
+
+        if useCalibration:
             # get latest calib factor (p0)
             MSC = dd.shotfile()
             if not MSC.Open('MSC', self.latestMSCfile(shot, 'MSED'), 'MSED'):
@@ -259,12 +280,20 @@ class MSAwriter(object):
         sg2 = src.GetSignalGroup('SG-2')
         sg1t = src.GetTimebase('SG-1')/1e9 # nanoseconds...
 
+        if channelSetupFile:
+            print('Using %s instead of MSX\' channel setup!'%channelSetupFile)
+            srcPiSigma, srcLOS = self.readChannelSetupFile(channelSetupFile)
+        else:
+            srcPiSigma = src.GetParameter('CH-SETUP', 'PI/SIGMA')
+            srcLOS = np.array([src.GetParameter('CH-SETUP', 'LOS-L%i'%i) for i in xrange(1,7)]).ravel()
+
         mse = [] # result
 
         # reference signals from PEMs
         pem40, pem46 = sg1[:,15], sg1[:,14]
 
-        labels = ['pi' if l == 1 else 'sigma' if l != 0 else '' for l in src.GetParameter('CH-SETUP', 'PI/SIGMA')]
+
+        labels = ['pi' if l == 1 else 'sigma' if l != 0 else '' for l in srcPiSigma]
         nchan = len(labels) - labels.count('')
 
         # function to get data corresponding to MSA g_m entry <channel>        
@@ -299,47 +328,51 @@ class MSAwriter(object):
                                                 faraday_degree[getActualBox(ch)],
                                                 BTF,
                                                 b1,
-                                                nfft=2048,
                                                 shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0)
             
             mse.append(cmse)
 
         # construct configuration object
-        print 'generating geometric information from FARO (lib/mse2014.txt) and MSX/CH-SETUP...'
-        rza = makeRzAs('lib/mse2014.txt')
-        los = np.array([src.GetParameter('CH-SETUP', 'LOS-L%i'%i) for i in xrange(1,7)]).ravel()
+        print('generating geometric information from FARO (lib/mse2014.txt) and %s...'%
+            ('MSX/CH-SETUP' if not channelSetupFile else channelSetupFile))
+        rza = makeRzAs(os.path.dirname(os.path.realpath(__file__)) + '/lib/mse2014.txt')
         R = np.zeros(nchan); dR = np.zeros(nchan)
         Z = np.zeros(nchan); dZ = np.zeros(nchan)
         A = np.zeros((nchan,10))
         for i in xrange(nchan):
-            R[i] = np.average(rza.R[np.where(los == getActualBox(i) + 1)])
-            dR[i] = np.std(rza.R[np.where(los == getActualBox(i) + 1)])
-            Z[i] = np.average(rza.z[np.where(los == getActualBox(i) + 1)])
-            dZ[i] = np.std(rza.z[np.where(los == getActualBox(i) + 1)])
-            A[i] = np.average(rza.Asigma[np.where(los == getActualBox(i) + 1)], axis=0) if labels[getActualBox(i)] == 'sigma' else \
-                   np.average(rza.Api[   np.where(los == getActualBox(i) + 1)], axis=0)
-        pisigma = src.GetParameter('CH-SETUP', 'PI/SIGMA')
-        pisigma = pisigma[np.where(pisigma != 0)[0]]
-        config = Bunch(R=R, z=Z, A=A, pisigma=pisigma, dR=dR, dZ=dZ,
-            labels=['%s %s'%(channelmap[getActualBox(i)][2], 'pi' if pisigma[i] == 1 else 'sigma') for i in xrange(10)])
-        print 'done'
-        #embed()
-        return (np.array(mset), np.array(mse).T, config)
+            chInd = np.where(srcLOS == getActualBox(i) + 1)
+            R[i] = np.average(rza.R[chInd])
+            dR[i] = np.std(rza.R[chInd])
+            Z[i] = np.average(rza.z[chInd])
+            dZ[i] = np.std(rza.z[chInd])
+            A[i] = np.average(rza.Asigma[chInd], axis=0) if labels[getActualBox(i)] == 'sigma' else \
+                   np.average(rza.Api[   chInd], axis=0)
+        pisigma = srcPiSigma[np.where(srcPiSigma != 0)[0]]
+        labels = np.array(['%s %s'%(channelmap[getActualBox(i)][2], 'pi' if pisigma[i] == 1 else 'sigma') 
+                           for i in xrange(10)])
 
-    def getIndicesIncompatibleWithNBI(self, shot, t):
+        o = R.argsort()[::-1] # order by R descending for easier usage
+        config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], dR=dR[o], dZ=dZ[o], labels=list(labels[o]))
+        print('done')
+        
+        return (np.array(mset), np.array(mse)[o].T, config)
+
+    def getIndicesIncompatibleWithNBI(self, shot, t, disallowedSources=(0,1,3)):
         NIS = dd.shotfile()
         if not NIS.Open('NIS', shot):
             return []
         p = NIS.GetSignalGroup('PNIQ')[:, :, 0]
         pt = NIS.GetTimebase('PNIQ')        
-        # only timepoints where NBI3 > 1MW and rest at 0
-        ind = np.intersect1d(np.where(p[:, 2] > 1000e3)[0], np.where(p[:, 0] == 0)[0])
-        ind = np.intersect1d(ind, np.where(p[:, 1] == 0)[0])
-        ind = np.intersect1d(ind, np.where(p[:, 3] == 0)[0])
+        # only timepoints where NBI3 > 1MW and rest at 0 (pi also allows NBI1 to be on)
+        ind = np.where(p[:, 2] > 1000e3)[0]
+        for source in disallowedSources:
+            ind = np.intersect1d(ind, np.where(p[:, source] == 0)[0])
+        if len(ind) == 0:
+            return range(len(t))
         dt = pt[1]-pt[0] # use time between two NBI data points as limit
         pt = pt[ind]
         toRemove = []
-        for i in range(len(t)):
+        for i in xrange(len(t)):
             ddt = np.abs(t[i]-pt).min()
             if ddt > dt:
                 toRemove.append(i)
@@ -352,8 +385,8 @@ class MSAwriter(object):
         t = np.delete(t, toRemove)
         return t, gm
 
-    def write(self, args, onlyNBI3=True, nfft=2048, showPlot=False, smooth_window=None):
-        res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration)
+    def write(self, args, onlyNBI3=True, showPlot=False, smooth_window=None):
+        res = self.readMSX(args)
         if res == False:
             return False
         gmt, gm, cfg = res
@@ -367,7 +400,7 @@ class MSAwriter(object):
         gm = self.onlyPlusMinus90(gm)
 
         if onlyNBI3:
-            gmt, gm = self.removeIncompatibleNBItimes(shot, gmt, gm)
+            gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
 
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
@@ -406,7 +439,7 @@ class MSAwriter(object):
 
         return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res)
 
-    def plot(self, what, args, nfft=2048, smooth_window=None):
+    def plot(self, what, args, smooth_window=None):
         ax = plt.subplot(111)
         channels2use = args.only_channels
         if what=='MSA':
@@ -421,7 +454,7 @@ class MSAwriter(object):
             lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
             labels = ['Ch %i (pi)'%(i+1) for i in piCh] + ['Ch %i (sigma)'%(i+1) for i in sigCh]
         else:
-            res = self.readMSX(args.src_exp, args.src_num, nfft, args.use_calibration, args.upshift_pi)
+            res = self.readMSX(args)
             if res == False:
                 return False
             gmt, gm, cfg = res
@@ -448,11 +481,16 @@ class MSAwriter(object):
         plt.grid(True, 'both')
         
         ax = plt.gca()
-        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt)
+        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt)#, disallowedSource=(1,3))
         upper = np.ones(len(gmt))*min(ax.get_ylim())
         lower = np.ones(len(gmt))*min(ax.get_ylim())
         upper[badind] = max(ax.get_ylim())
-        plt.fill_between(gmt, upper, lower, color='r', alpha=0.2)
+        plt.fill_between(gmt, upper, lower, color='red', alpha=0.2)
+        #badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt, disallowedSource=(0,))
+        #upper = np.ones(len(gmt))*min(ax.get_ylim())
+        #lower = np.ones(len(gmt))*min(ax.get_ylim())
+        #upper[badind] = max(ax.get_ylim())
+        #plt.fill_between(gmt, upper, lower, color='red', alpha=0.2)
 
         plt.show()
         return True
@@ -483,18 +521,16 @@ def main():
         help="don't load calibration from MSC, use average hardcoded values instead")
     parser.add_argument('-i124', '--ignore-NBI124', dest='ignore_NBI124', action='store_true', default=False,
         help="don't remove data where wrong NBI configuration was present")
-    parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
-        help="only plot channels 1,2,5")
     parser.add_argument('-up', '--upshift-pi', dest='upshift_pi', action='store_true', default=False,
         help="shift pi lines up by 90deg")
-    #parser.add_argument('-nfft', type=int, default=2048,
-    #    help='FFT window length, e.g. -nfft 2048') # can destroy coherence in phase calculation, careful when choosing other values
-    nfft = 2048
-    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
-        help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
-    
+    parser.add_argument('-chs', '--channel-setup', dest='chs_file', type=str, default=None,
+        help="provide MSX/CH-SETUP manually as file")
+    parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
+        help="only plot channels 1,2,5")
     parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
         help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
+    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
+        help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
@@ -531,8 +567,8 @@ def main():
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
-        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, nfft, smooth_window=args.smooth_window))
-            or  (args.action == 'plotMSX' and writer.plot('MSX', args, nfft, smooth_window=args.smooth_window))):
+        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, smooth_window=args.smooth_window))
+            or  (args.action == 'plotMSX' and writer.plot('MSX', args, smooth_window=args.smooth_window))):
             print 'something went wrong :-('
             return False
     return True

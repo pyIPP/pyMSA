@@ -2,16 +2,16 @@
 import os, sys
 import numpy as np
 import dd_20140409 as dd, ww_20140403 as ww
-import matplotlib.pyplot as plt
-import matplotlib as mpl
+#import matplotlib.pyplot as plt
+#import matplotlib as mpl
 import argparse
-from pylab import specgram
+#from pylab import specgram
 from scipy.interpolate import interp1d
 import warnings
 import random
 import getpass
 from IPython import embed
-from mpl_toolkits.mplot3d import Axes3D
+#from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial.distance import cdist
 from copy import copy
 
@@ -49,7 +49,11 @@ def makeRzAs(mseFaroFile='mse2014.txt', plot=False, beamSubdivisionLength=1e-3):
     Q3c[:] = Q3c[1], Q3c[1] + np.array([vdx/vd, vdy/vd, vdz/vd])
 
     if plot:
-        from mayavi import mlab
+        try:
+            from mayavi import mlab # needs intel/12.1!!!!
+        except Exception, e:
+            print 'mayavi failed to load '
+            raise e
         mlab.plot3d(Q3c[:,0], Q3c[:,1], Q3c[:,2], color=(0,1,0))
 
     # load MSE coords from Faro
@@ -197,7 +201,7 @@ def makeRzAs(mseFaroFile='mse2014.txt', plot=False, beamSubdivisionLength=1e-3):
 
 
 if __name__ == '__main__':
-    asd = makeRzAs(plot=False)
+    asd = makeRzAs(plot=True)
     embed()
 
 
