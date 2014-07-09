@@ -231,6 +231,23 @@ class MSAwriter(object):
             los = np.array([np.array(lines[i].split(), dtype=int) for i in xrange(1,7)]).ravel()
         return pisigma, los
 
+    def getBTF(self, shot):
+        if shot < 30160:
+            TOT = dd.shotfile()
+            if not TOT.Open('TOT', shot, 'AUGD'):
+                return False
+            BTFt = TOT.GetTimebase('BTF') 
+            BTFd = -TOT.GetSignal('BTF')
+            TOT.Close()
+        else:
+            MBI = dd.shotfile()
+            if not MBI.Open('MBI', shot, 'AUGD'):
+                return False
+            BTFt = MBI.GetTimebase('BTF')
+            BTFd = MBI.GetSignal('BTF')
+            MBI.Close()
+        return BTFt, BTFd
+
     def readMSX(self, args):
         exp = args.src_exp
         shot = args.src_num
@@ -252,24 +269,12 @@ class MSAwriter(object):
             b1 = MSC.GetParameter('C_Angle', 'b1')
             MSC.Close(); del MSC
             # get BTF
-            if shot < 30160:
-                TOT = dd.shotfile()
-                if not TOT.Open('TOT', shot, 'AUGD'):
-                    return False
-                BTFt = TOT.GetTimebase('BTF') 
-                BTFd = -TOT.GetSignal('BTF')
-                TOT.Close(); del TOT
-            else:
-                MBI = dd.shotfile()
-                if not MBI.Open('MBI', shot, 'AUGD'):
-                    return False
-                BTFt = MBI.GetTimebase('BTF')
-                BTFd = MBI.GetSignal('BTF')
-                MBI.Close()
+            BTFt, BTFd = self.getBTF(shot)
+            
             BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)            
         else:
-            calib_factor = [0.8]*10
-            faraday_degree = [-0.7]*10
+            calib_factor = [0.8]*20
+            faraday_degree = [-0.7]*20
             BTF = interp1d([-10, 100], [-2.5, -2.5], fill_value=-2.5, bounds_error=False)
             b1 = 66.7
 
@@ -470,13 +475,27 @@ class MSAwriter(object):
         leg = plt.legend(lineObjects, [l for l in labels], fontsize=10)
         for legobj in leg.legendHandles:
             legobj.set_linewidth(2.0)
-        plt.title('%s:%s %i' % (args.src_exp, what, args.src_num))
+
+        NIS = dd.shotfile()
+        if not NIS.Open('NIS', args.src_num):
+            nbi3u = 0
+        else:
+            nbi3u = NIS.GetParameter('INJ1', 'UEXQ')[2]
+        NIS.Close()
+
+        JOU = dd.shotfile()
+        if not JOU.Open('JOU', args.src_num):
+            Btf = 0.
+        else:
+            Btf = JOU.GetParameter('MAGNETIC', 'BT')
+
+        plt.title('%s:%s %i (%3.2f T, NBI3 %4.2f keV)' % (args.src_exp, what, args.src_num, Btf, nbi3u))
         plt.xlabel('t [s]')
         plt.ylabel('g_m [deg]')
         
         from matplotlib.ticker import MultipleLocator
         ax.xaxis.set_minor_locator(MultipleLocator(0.5))
-        ax.yaxis.set_minor_locator(MultipleLocator(0.4))
+        ax.yaxis.set_minor_locator(MultipleLocator(1.0))
         
         plt.grid(True, 'both')
         
@@ -491,8 +510,28 @@ class MSAwriter(object):
         #lower = np.ones(len(gmt))*min(ax.get_ylim())
         #upper[badind] = max(ax.get_ylim())
         #plt.fill_between(gmt, upper, lower, color='red', alpha=0.2)
-
-        plt.show()
+        savefig = False
+        noshow = False
+        if args.plot_options != '':
+            for entry in args.plot_options.split(':'):
+                if entry == 'savefig':
+                    savefig = True
+                    continue
+                if entry == 'noshow':
+                    noshow = True
+                    continue
+                key, value = entry.split('=')
+                if key == 'xlim':
+                    plt.xlim(float(value.split(',')[0]), float(value.split(',')[1]))
+                    continue
+                if key == 'ylim':
+                    plt.ylim(float(value.split(',')[0]), float(value.split(',')[1]))
+                    continue
+        #embed()
+        if savefig:
+            plt.savefig('%i_%s.png'%(args.src_num, args.plot_options.replace(':', '_')))
+        if not noshow:
+            plt.show()
         return True
 
     def replicate(self, args):
@@ -531,6 +570,8 @@ def main():
         help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
+    parser.add_argument('-po', '--plot-options', dest='plot_options', type=str, default='',
+        help='various plot options like -po xlim=0,7:ylim=-5,15:savefig:noshow')
     
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
