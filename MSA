@@ -20,6 +20,8 @@ try:
     import getpass
     from IPython import embed
     from lib.RzAmaker import makeRzAs
+    from scipy.signal import kaiserord, lfilter, firwin, freqz
+    from copy import copy
 except Exception, e:
     print '    *** Error: %s'%e
     print ''' 
@@ -49,13 +51,15 @@ Purple
 Maroon
 Olive
 Green
+DarkGreen 
 Lime
 Aqua
 Silver
 Gray
-Yellow
 Teal
 '''
+# Yellow
+
 mpl.rcParams['axes.color_cycle'] = tmp.split()
 
 class Bunch(object):
@@ -162,20 +166,6 @@ class MSAwriter(object):
 
     def latestMSCfile(self, shot=0, exp='MSED'):
         return dd.PreviousShot('MSC', shot, exp)
-
-    def _movingAverage(self, signal, n):
-        ret = np.cumsum(signal, dtype=float)
-        ret[n:] = ret[n:] - ret[:-n]
-        return ret[n - 1:] / n
-
-    def smooth(self, gmt, gm, smooth_window):
-        dt = gmt[1] - gmt[0]
-        n = max(1, int(smooth_window/dt/1e3))
-        print 'smoothing over %i post-fft samples...'%n
-        new_gmt = self._movingAverage(gmt, n)
-        new_gm = np.array([self._movingAverage(g, n) for g in gm.T]).T
-        #print 'in', gm.shape, 'out', new_gm.shape
-        return new_gmt, new_gm
 
     def onlyPlusMinus90(self, gm):
         return (gm+90)%180-90
@@ -390,7 +380,7 @@ class MSAwriter(object):
         t = np.delete(t, toRemove)
         return t, gm
 
-    def write(self, args, onlyNBI3=True, showPlot=False, smooth_window=None):
+    def write(self, args, onlyNBI3=True, showPlot=False):
         res = self.readMSX(args)
         if res == False:
             return False
@@ -399,8 +389,7 @@ class MSAwriter(object):
         if args.channel_order != None:
             gm = gm[:, args.channel_order]
 
-        if smooth_window != None:
-            gmt, gm = self.smooth(gmt, gm, smooth_window)
+        gmt, gm = self.fir(gmt, gm, args)
 
         gm = self.onlyPlusMinus90(gm)
 
@@ -444,7 +433,33 @@ class MSAwriter(object):
 
         return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res)
 
-    def plot(self, what, args, smooth_window=None):
+    def _movingAverage(self, signal, n):
+        ret = np.cumsum(signal, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1:] / n
+
+    def smooth(self, gmt, gm, smooth_window):
+        dt = gmt[1] - gmt[0]
+        n = max(1, int(smooth_window/dt/1e3))
+        print 'smoothing over %i post-fft samples...'%n
+        new_gmt = self._movingAverage(gmt, n)
+        new_gm = np.array([self._movingAverage(g, n) for g in gm.T]).T
+        #print 'in', gm.shape, 'out', new_gm.shape
+        return new_gmt, new_gm
+
+    def fir(self, gmt, gm, args):
+        # adapted from http://wiki.scipy.org/Cookbook/FIRFilter
+        sample_rate = 1./(gmt[1]-gmt[0])
+        nyq_rate = sample_rate / 2.0
+        ripple_db, width, cutoff_hz = args.fir
+        width = width/nyq_rate
+        N, beta = kaiserord(ripple_db, width)
+        taps = firwin(N, cutoff_hz/nyq_rate, window=('kaiser', beta))
+        delay = 0.5 * (N-1) / sample_rate
+
+        return gmt-delay, np.array([lfilter(taps, 1.0, gm[:,i]) for i in xrange(gm.shape[1])]).T
+
+    def plot(self, what, args):
         ax = plt.subplot(111)
         channels2use = args.only_channels
         if what=='MSA':
@@ -454,8 +469,6 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm = res[15:17]
-            if smooth_window != None:
-                gmt, gm = self.smooth(gmt, gm, smooth_window)
             lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
             labels = ['Ch %i (pi)'%(i+1) for i in piCh] + ['Ch %i (sigma)'%(i+1) for i in sigCh]
         else:
@@ -463,10 +476,14 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm, cfg = res
+
+            bak = copy(gmt), copy(self.onlyPlusMinus90(gm))
+
             if args.channel_order != None:
                 gm = gm[:, args.channel_order]
-            if smooth_window != None:
-                gmt, gm = self.smooth(gmt, gm, smooth_window)
+
+            gmt, gm = self.fir(gmt, gm, args)
+
             gm = self.onlyPlusMinus90(gm)
             lineObjects = plt.plot(gmt, gm)
             labels = cfg.labels
@@ -527,6 +544,9 @@ class MSAwriter(object):
                 if key == 'ylim':
                     plt.ylim(float(value.split(',')[0]), float(value.split(',')[1]))
                     continue
+
+        plt.gca().set_color_cycle(None) # reset color cycle
+        plt.plot(bak[0], bak[1], alpha=0.25)
         #embed()
         if savefig:
             plt.savefig('%i_%s.png'%(args.src_num, args.plot_options.replace(':', '_')))
@@ -566,8 +586,10 @@ def main():
         help="provide MSX/CH-SETUP manually as file")
     parser.add_argument('-oc', '--only-channels', dest='only_channels', type=str, default=None,
         help="only plot channels 1,2,5")
-    parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
-        help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
+    #parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
+    #    help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
+    parser.add_argument('-fir', dest='fir', type=str, default='30,15,4',
+        help='smooth using Kaiser FIR low pass filter, arguments: ripple,width,cutoffHz, default: -fir 30,15,4')
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     parser.add_argument('-po', '--plot-options', dest='plot_options', type=str, default='',
@@ -577,6 +599,9 @@ def main():
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
     args = parser.parse_args()
+
+    if args.fir != None:
+        args.fir = [float(k) for k in args.fir.split(',')]
     
     try:
         if args.channel_order != None:
@@ -604,12 +629,12 @@ def main():
             print 'something went wrong :-('
             return False
     elif args.action == 'write':
-        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124), smooth_window=args.smooth_window):
+        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124)):
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
-        if not ((args.action == 'plotMSA' and writer.plot('MSA', args, smooth_window=args.smooth_window))
-            or  (args.action == 'plotMSX' and writer.plot('MSX', args, smooth_window=args.smooth_window))):
+        if not ((args.action == 'plotMSA' and writer.plot('MSA', args))
+            or  (args.action == 'plotMSX' and writer.plot('MSX', args))):
             print 'something went wrong :-('
             return False
     return True
