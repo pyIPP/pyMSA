@@ -289,7 +289,7 @@ class MSAwriter(object):
             print('Using %s instead of MSX\' channel setup!'%channelSetupFile)
             srcPiSigma, srcLOS = self.readChannelSetupFile(channelSetupFile)
         elif shot < 30992:
-            print('Shot number < 30992, using default channel setup!')
+            print('Shot number < 30992, using old channel setup!')
             srcPiSigma, srcLOS = self.readChannelSetupFile(None, useDefault=True)
         else:
             srcPiSigma = src.GetParameter('CH-SETUP', 'PI/SIGMA')
@@ -377,7 +377,7 @@ class MSAwriter(object):
             ind = np.intersect1d(ind, np.where(p[:, source] == 0)[0])
         if len(ind) == 0:
             return range(len(t))
-        dt = pt[1]-pt[0] # use time between two NBI data points as limit
+        dt = (pt[1]-pt[0])*2 # use 2x time between two NBI data points as limit
         pt = pt[ind]
         toRemove = []
         for i in xrange(len(t)):
@@ -428,7 +428,8 @@ class MSAwriter(object):
             plt.legend()
             plt.ylim(0,1.1)
             plt.show()
-
+        #embed()
+        #sys.exit()
         return uncs
 
 
@@ -573,11 +574,11 @@ class MSAwriter(object):
         plt.grid(True, 'both')
         
         ax = plt.gca()
-        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt)#, disallowedSource=(1,3))
-        upper = np.ones(len(gmt))*min(ax.get_ylim())
-        lower = np.ones(len(gmt))*min(ax.get_ylim())
+        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmtb)#, disallowedSource=(1,3))
+        upper = np.ones(len(gmtb))*min(ax.get_ylim())
+        lower = np.ones(len(gmtb))*min(ax.get_ylim())
         upper[badind] = max(ax.get_ylim())
-        plt.fill_between(gmt, upper, lower, color='red', alpha=0.2)
+        plt.fill_between(gmtb, upper, lower, color='red', alpha=0.2)
         #badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt, disallowedSource=(0,))
         #upper = np.ones(len(gmt))*min(ax.get_ylim())
         #lower = np.ones(len(gmt))*min(ax.get_ylim())
