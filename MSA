@@ -45,17 +45,18 @@ tmp = '''
 Black
 Red
 Blue
-Navy
 Fuchsia
+Navy
 Purple
 Maroon
 Olive
 Green
+SeaGreen 
 DarkGreen 
+Gray
 Lime
 Aqua
 Silver
-Gray
 Teal
 '''
 # Yellow
@@ -477,7 +478,7 @@ class MSAwriter(object):
                 return False
             gmt, gm, cfg = res
 
-            bak = copy(gmt), copy(self.onlyPlusMinus90(gm))
+            gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
             if args.channel_order != None:
                 gm = gm[:, args.channel_order]
@@ -546,12 +547,14 @@ class MSAwriter(object):
                     continue
 
         plt.gca().set_color_cycle(None) # reset color cycle
-        plt.plot(bak[0], bak[1], alpha=0.25)
-        #embed()
+        plt.plot(gmtb, gmb, alpha=0.25)
         if savefig:
             plt.savefig('%i_%s.png'%(args.src_num, args.plot_options.replace(':', '_')))
         if not noshow:
             plt.show()
+
+        #embed()
+        
         return True
 
     def replicate(self, args):
@@ -647,3 +650,5 @@ if __name__ == '__main__':
 # os.system('./MSA.py -sn 29761 -se AUGD -de ABOCK -dn 234 write')
 # ./MSA.py -sn 29761 -se ABOCK -de ABOCK -dn 123 replicate
 # ./MSA.py -sn 29761 -se AUGD -de ABOCK -dn 234 write
+
+
