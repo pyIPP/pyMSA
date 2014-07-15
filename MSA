@@ -386,9 +386,9 @@ class MSAwriter(object):
                 toRemove.append(i)
         return toRemove
 
-    def removeIncompatibleNBItimes(self, shot, t, gm):
+    def removeIncompatibleNBItimes(self, shot, t, gm, disallowedSources=(0,1,3)):
         # remove items where NBI1,2,4 were on/NBI3 off
-        toRemove = self.getIndicesIncompatibleWithNBI(shot, t)
+        toRemove = self.getIndicesIncompatibleWithNBI(shot, t, disallowedSources=disallowedSources)
         gm = np.delete(gm, toRemove, axis=0)
         t = np.delete(t, toRemove)
         return t, gm
@@ -441,14 +441,13 @@ class MSAwriter(object):
         if args.channel_order != None:
             gm = gm[:, args.channel_order]
 
+        if onlyNBI3:
+            gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
+
         gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
         gmt, gm = self.fir(gmt, gm, args)
         gm = self.onlyPlusMinus90(gm)
-
-        if onlyNBI3:
-            gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
-            gmtb, gmb = self.removeIncompatibleNBItimes(args.src_num, gmtb, gmb)
 
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
@@ -503,6 +502,8 @@ class MSAwriter(object):
 
     def fir(self, gmt, gm, args):
         # adapted from http://wiki.scipy.org/Cookbook/FIRFilter
+        if len(gmt) < 2:
+            return gmt, gm
         sample_rate = 1./(gmt[1]-gmt[0])
         nyq_rate = sample_rate / 2.0
         ripple_db, width, cutoff_hz = args.fir
@@ -536,6 +537,7 @@ class MSAwriter(object):
             if args.channel_order != None:
                 gm = gm[:, args.channel_order]
 
+            gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
             gmt, gm = self.fir(gmt, gm, args)
 
             gm = self.onlyPlusMinus90(gm)
