@@ -208,18 +208,27 @@ class MSAwriter(object):
 
         toReturn = -np.arctan2(calib_factor*I40, I46)*180./np.pi*0.5 # second stokes component, thus *0.5
         toReturn += faraday_strength*btf(t) + abs_offset
-        #toReturn = (toReturn+90)%180-90 # only [-90,+90] please
-        #if 
-        #toReturn[np.where(toReturn >  90)] -= 180
-        #toReturn[np.where(toReturn < -90)] += 180
         
         return t, toReturn + shiftby
 
-    def readChannelSetupFile(self, file):
-        with open(file) as f:
+    def readChannelSetupFile(self, filename, useDefault=False):
+        if useDefault:
+            lines = '''2 2 2 2 2 2 2 2 2 2 0 0 0 0 0 0 0 0 0 0
+                       0  0  0  0  0  0  0  0  0  0
+                       1  2  3  4  5  6  7  9  0  0
+                       1  2  3  4  5  6  7  9  8  0
+                       0  0  0  0  0  0  0  0  8 10
+                       0  0  0  0  0  0  0  0  0 10
+                       0  0  0  0  0  0  0  0  0  0
+                       line 1:    pi=1, sigma=2, rest=0
+                       lines 2-7: 10x6 entries like on switchboard,
+                                  1-12=(MSE1-10)+(MER1/2)'''.split('\n')
+        else:
+            f = open(filename)
             lines = f.readlines()
-            pisigma = np.array(lines[0].split(), dtype=int)
-            los = np.array([np.array(lines[i].split(), dtype=int) for i in xrange(1,7)]).ravel()
+            f.close()
+        pisigma = np.array(lines[0].split(), dtype=int)
+        los = np.array([np.array(lines[i].split(), dtype=int) for i in xrange(1,7)]).ravel()
         return pisigma, los
 
     def getBTF(self, shot):
@@ -279,6 +288,9 @@ class MSAwriter(object):
         if channelSetupFile:
             print('Using %s instead of MSX\' channel setup!'%channelSetupFile)
             srcPiSigma, srcLOS = self.readChannelSetupFile(channelSetupFile)
+        elif shot < 30992:
+            print('Shot number < 30992, using default channel setup!')
+            srcPiSigma, srcLOS = self.readChannelSetupFile(None, useDefault=True)
         else:
             srcPiSigma = src.GetParameter('CH-SETUP', 'PI/SIGMA')
             srcLOS = np.array([src.GetParameter('CH-SETUP', 'LOS-L%i'%i) for i in xrange(1,7)]).ravel()
