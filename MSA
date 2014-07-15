@@ -575,15 +575,11 @@ class MSAwriter(object):
         
         ax = plt.gca()
         badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmtb)#, disallowedSource=(1,3))
-        upper = np.ones(len(gmtb))*min(ax.get_ylim())
-        lower = np.ones(len(gmtb))*min(ax.get_ylim())
-        upper[badind] = max(ax.get_ylim())
+        upper = np.ones(len(gmtb))*-100
+        lower = np.ones(len(gmtb))*-100
+        upper[badind] = 100
         plt.fill_between(gmtb, upper, lower, color='red', alpha=0.2)
-        #badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmt, disallowedSource=(0,))
-        #upper = np.ones(len(gmt))*min(ax.get_ylim())
-        #lower = np.ones(len(gmt))*min(ax.get_ylim())
-        #upper[badind] = max(ax.get_ylim())
-        #plt.fill_between(gmt, upper, lower, color='red', alpha=0.2)
+        
         savefig = False
         noshow = False
         if args.plot_options != '':
