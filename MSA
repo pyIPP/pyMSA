@@ -381,6 +381,45 @@ class MSAwriter(object):
         t = np.delete(t, toRemove)
         return t, gm
 
+    def getErrgm(self, gmt, gm, gmtb, gmb):
+        def rolling_window(a, window):
+            # from http://www.rigtorp.se/2011/01/01/rolling-statistics-numpy.html
+            shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
+            strides = a.strides + (a.strides[-1],)
+            return np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+
+        minTind = np.abs(gmt - gmtb[0]).argmin() + 1
+        t2use = gmt[minTind:]
+
+        uncs = np.zeros_like(gm)
+
+        for i in xrange(gm.shape[1]):
+            signal = interp1d(gmt[minTind:], gm[minTind:, i])
+            noise = interp1d(gmtb, gmb[:,i])
+            diff = signal(t2use) - noise(t2use)
+            n = 25
+            t2use2 = t2use[n/2:-n/2+1]
+            s = np.std(rolling_window(diff, n), 1)
+            s[np.where(s > 2.0)] = 180
+            unc = interp1d(t2use2, s, bounds_error=False, fill_value=180.)
+            uncs[:,i] = unc(gmt)
+            if False: # plot single channel and uncertainty
+                ax = plt.subplot(211)
+                plt.plot(gmt, unc(gmt))
+                plt.subplot(212, sharex=ax)
+                plt.plot(gmt, gm[:,i])
+                plt.plot(gmtb, gmb[:,i], alpha=0.25)
+                plt.title(str(i+1))
+                plt.show()
+        if False: # plot all uncertainties
+            plt.plot(gmt, uncs)
+            plt.legend()
+            plt.ylim(0,1.1)
+            plt.show()
+
+        return uncs
+
+
     def write(self, args, onlyNBI3=True, showPlot=False):
         res = self.readMSX(args)
         if res == False:
@@ -390,12 +429,14 @@ class MSAwriter(object):
         if args.channel_order != None:
             gm = gm[:, args.channel_order]
 
-        gmt, gm = self.fir(gmt, gm, args)
+        gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
+        gmt, gm = self.fir(gmt, gm, args)
         gm = self.onlyPlusMinus90(gm)
 
         if onlyNBI3:
             gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
+            gmtb, gmb = self.removeIncompatibleNBItimes(args.src_num, gmtb, gmb)
 
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
@@ -427,7 +468,7 @@ class MSAwriter(object):
         res[15] = gmt # TMSA
         res[16] = gm # gm
         res[17] = gm*0. # gm2
-        res[18] = gm*0 + 0.2 # errgm
+        res[18] = self.getErrgm(gmt, gm, gmtb, gmb) # gm*0 + 0.2 # errgm
         res[19] = gm*0 + 180. # errgm2
         res[20] = vbeam # vbeam
         res[21] = cfg.pisigma #pisigma
@@ -553,8 +594,6 @@ class MSAwriter(object):
         if not noshow:
             plt.show()
 
-        #embed()
-        
         return True
 
     def replicate(self, args):
