@@ -52,7 +52,7 @@ def makeRzAs(mseFaroFile='mse2014.txt', plot=False, beamSubdivisionLength=1e-3):
         try:
             from mayavi import mlab # needs intel/12.1!!!!
         except Exception, e:
-            print 'mayavi failed to load '
+            print 'mayavi failed to load, are you using intel/12.1?'
             raise e
         mlab.plot3d(Q3c[:,0], Q3c[:,1], Q3c[:,2], color=(0,1,0))
 

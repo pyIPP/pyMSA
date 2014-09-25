@@ -372,12 +372,13 @@ class MSAwriter(object):
         p = NIS.GetSignalGroup('PNIQ')[:, :, 0]
         pt = NIS.GetTimebase('PNIQ')        
         # only timepoints where NBI3 > 1MW and rest at 0 (pi also allows NBI1 to be on)
-        ind = np.where(p[:, 2] > 1000e3)[0]
+        ind = np.where(p[:, 2] > 100e3)[0]
+        #embed()
         for source in disallowedSources:
             ind = np.intersect1d(ind, np.where(p[:, source] == 0)[0])
         if len(ind) == 0:
             return range(len(t))
-        dt = (pt[1]-pt[0])*2 # use 2x time between two NBI data points as limit
+        dt = (pt[1]-pt[0])*2. # use 2x time between two NBI data points as limit
         pt = pt[ind]
         toRemove = []
         for i in xrange(len(t)):
@@ -532,6 +533,12 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm, cfg = res
+            
+            print 'ch, R, z, A1-10'
+            for i in xrange(gm.shape[1]):
+                print '%2i   %4.3f   %+4.3f  '%(i+1, cfg.R[i], cfg.z[i]), '  '.join('%+5.4f'%F for F in cfg.A[i] )
+            
+            #embed()
 
             gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
