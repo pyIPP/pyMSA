@@ -389,10 +389,15 @@ class MSAwriter(object):
 
     def removeIncompatibleNBItimes(self, shot, t, gm, disallowedSources=(0,1,3)):
         # remove items where NBI1,2,4 were on/NBI3 off
-        toRemove = self.getIndicesIncompatibleWithNBI(shot, t, disallowedSources=disallowedSources)
-        gm = np.delete(gm, toRemove, axis=0)
-        t = np.delete(t, toRemove)
-        return t, gm
+        # make sure equal termporal spacing is preserved
+        toRemove = np.array(self.getIndicesIncompatibleWithNBI(shot, t, disallowedSources=disallowedSources))
+        gm2 = np.delete(gm, toRemove, axis=0)
+        t2 = np.delete(t, toRemove)
+        t3 = np.arange(t2[0], t2[-1], t[1]-t[0])
+        gm3 = np.zeros((t3.shape[0], gm.shape[1]))
+        for i in range(gm.shape[1]):
+            gm3[:,i] = interp1d(t2, gm2[:,i])(t3)
+        return t3, gm3
 
     def getErrgm(self, gmt, gm, gmtb, gmb):
         def rolling_window(a, window):
@@ -419,6 +424,7 @@ class MSAwriter(object):
             if False: # plot single channel and uncertainty
                 ax = plt.subplot(211)
                 plt.plot(gmt, unc(gmt))
+                plt.ylim(0,2.5)
                 plt.subplot(212, sharex=ax)
                 plt.plot(gmt, gm[:,i])
                 plt.plot(gmtb, gmb[:,i], alpha=0.25)
@@ -511,10 +517,14 @@ class MSAwriter(object):
         ripple_db, width, cutoff_hz = args.fir
         width = width/nyq_rate
         N, beta = kaiserord(ripple_db, width)
-        taps = firwin(N, cutoff_hz/nyq_rate, window=('kaiser', beta))
+        try:
+            taps = firwin(N, cutoff_hz/nyq_rate, window=('kaiser', beta))
+        except ValueError, e:
+            print "nyq:", nyq_rate
+            raise e
         delay = 0.5 * (N-1) / sample_rate
-
-        return gmt-delay, np.array([lfilter(taps, 1.0, gm[:,i]) for i in xrange(gm.shape[1])]).T
+        
+        return gmt[N-1:]-delay, np.array([lfilter(taps, 1.0, gm[:,i])[N-1:] for i in xrange(gm.shape[1])]).T
 
     def plot(self, what, args):
         ax = plt.subplot(111)
@@ -649,7 +659,7 @@ def main():
     #parser.add_argument('-s', '--smooth', dest='smooth_window', type=float, default=None,
     #    help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
     parser.add_argument('-fir', dest='fir', type=str, default='30,15,4',
-        help='smooth using Kaiser FIR low pass filter, arguments: ripple,width,cutoffHz, default: -fir 30,15,4')
+        help='smooth using Kaiser FIR low pass filter, arguments: ripple,width,cutoffHz default: -fir 30,15,4')
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     parser.add_argument('-po', '--plot-options', dest='plot_options', type=str, default='',
