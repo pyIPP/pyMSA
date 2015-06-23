@@ -7,20 +7,30 @@ try:
     import os, sys
     import numpy as np
     import dd_20140409 as dd, ww_20140403 as ww
+    #from IPython import embed
     # modified mpl necessary
-    import site
-    site.addsitedir('/afs/ipp/u/abock/lib/python2.7/site-packages/')
-    import matplotlib.pyplot as plt
-    import matplotlib as mpl
+    #import site
+    try:
+        #site.addsitedir('/afs/ipp/u/abock/lib/python2.7/site-packages/')
+        #synd = sys.path.index('/afs/ipp/tok/soft/python27/ipython/1.1.0/@sys/lib/python2.7/site-packages')
+        #sys.path.insert(synd+1, 
+        #    '/afs/ipp/u/abock/lib/python2.7/site-packages/matplotlib-1.3.1-py2.7-linux-x86_64.egg/')
+        import matplotlib.pyplot as plt
+        import matplotlib as mpl
+    except Exception, e:
+        print e
+        #embed()
+
+    #embed()
+
     import argparse
     from matplotlib.mlab import specgram
     from scipy.interpolate import interp1d
-    import warnings
-    import random
+    #import warnings
+    #import random
     import getpass
-    from IPython import embed
     from lib.RzAmaker import makeRzAs
-    from scipy.signal import kaiserord, lfilter, firwin, freqz
+    from scipy.signal import kaiserord, lfilter, firwin
     from copy import copy
 except Exception, e:
     print '    *** Error: %s'%e
@@ -177,7 +187,7 @@ class MSAwriter(object):
                           calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
                           nfft=2048, shiftby=0, plot=False):
         t0, dt = t[0], t[1] - t[0]
-        if self.pem40a == None or self.pem46a == None: # do only once, then cache
+        if self.pem40a is None or self.pem46a is None: # do only once, then cache
             self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
             self.pem46a = specgram(pem46, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
 
@@ -248,7 +258,7 @@ class MSAwriter(object):
             MBI.Close()
         return BTFt, BTFd
 
-    def readMSX(self, args):
+    def readMSX(self, args, just_time=False):
         exp = args.src_exp
         shot = args.src_num
         useCalibration=args.use_calibration
@@ -263,13 +273,16 @@ class MSAwriter(object):
             calib_factor = -MSC.GetParameter('C_MSX', 'p0')
             # get faraday rotation degree
             faraday_degree    = MSC.GetParameter('C_Farada', 'BTF')  
-            if faraday_degree == None:
+            if faraday_degree is None:
                 return False
             # get b1 absolute offset
             b1 = MSC.GetParameter('C_Angle', 'b1')
             MSC.Close(); del MSC
             # get BTF
-            BTFt, BTFd = self.getBTF(shot)
+            res = self.getBTF(shot)
+            if res == False:
+                return False
+            BTFt, BTFd = res
             
             BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)            
         else:
@@ -328,7 +341,8 @@ class MSAwriter(object):
             return sg1[:,index] if group == 'SG-1' else sg2[:,index]
 
         for ch in range(nchan):
-            print '%2i/%2i' %(ch+1, nchan)
+            if not just_time:
+                print '%2i/%2i' %(ch+1, nchan)
             data = getData(ch)
 
             mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
@@ -337,13 +351,16 @@ class MSAwriter(object):
                                                 BTF,
                                                 b1,
                                                 shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0)
-            
+            if just_time:
+                return mset, np.zeros([len(mset), nchan])
             mse.append(cmse)
 
         # construct configuration object
-        print('generating geometric information from FARO (lib/mse2014.txt) and %s...'%
-            ('MSX/CH-SETUP' if not channelSetupFile else channelSetupFile))
-        rza = makeRzAs(os.path.dirname(os.path.realpath(__file__)) + '/lib/mse2014.txt')
+        farofile = 'mse2014.txt'
+        if shot > 31776: farofile = 'mse2015.txt'
+        print('generating geometric information from FARO (lib/%s) and %s...'%(
+            farofile, ('MSX/CH-SETUP' if not channelSetupFile else channelSetupFile)))
+        rza = makeRzAs(os.path.dirname(os.path.realpath(__file__)) + '/lib/%s'%farofile)
         R = np.zeros(nchan); dR = np.zeros(nchan)
         Z = np.zeros(nchan); dZ = np.zeros(nchan)
         A = np.zeros((nchan,10))
@@ -365,39 +382,64 @@ class MSAwriter(object):
         
         return (np.array(mset), np.array(mse)[o].T, config)
 
-    def getIndicesIncompatibleWithNBI(self, shot, t, disallowedSources=(0,1,3)):
-        NIS = dd.shotfile()
-        if not NIS.Open('NIS', shot):
-            return []
-        p = NIS.GetSignalGroup('PNIQ')[:, :, 0]
-        pt = NIS.GetTimebase('PNIQ')        
-        # only timepoints where NBI3 > 1MW and rest at 0 (pi also allows NBI1 to be on)
-        ind = np.where(p[:, 2] > 100e3)[0]
+    def getIncompatibleIndices(self, shot, t, disallowedSources=(0,1,3)):
         #embed()
-        for source in disallowedSources:
-            ind = np.intersect1d(ind, np.where(p[:, source] == 0)[0])
-        if len(ind) == 0:
+        toRemove1 = []
+        NIS = dd.shotfile() # NBI
+        if NIS.Open('NIS', shot):
+            p = NIS.GetSignalGroup('PNIQ')[:, :, 0]
+            pt = NIS.GetTimebase('PNIQ')        
+            # only timepoints where NBI3 > 1MW and rest at 0 (pi also allows NBI1 to be on)
+            ind = np.where(p[:, 2] > 100e3)[0]
+            if len(ind) == 0:
+                return range(len(t))
+            for source in disallowedSources:
+                ind = np.intersect1d(ind, np.where(p[:, source] == 0)[0])
+            if len(ind) != 0:
+                dt = (pt[1]-pt[0])*0.51 # use half time between two NBI samples as limit
+                pt = pt[ind]
+                for i in xrange(len(t)):
+                    ddt = np.abs(t[i]-pt).min()
+                    if ddt - dt > 0:
+                        toRemove1.append(i)
+        else:
             return range(len(t))
-        dt = (pt[1]-pt[0])*2. # use 2x time between two NBI data points as limit
-        pt = pt[ind]
-        toRemove = []
-        for i in xrange(len(t)):
-            ddt = np.abs(t[i]-pt).min()
-            if ddt > dt:
-                toRemove.append(i)
-        return toRemove
-
-    def removeIncompatibleNBItimes(self, shot, t, gm, disallowedSources=(0,1,3)):
+        toRemove2 = []
+        ICP = dd.shotfile() # ICRH
+        if ICP.Open('ICP', shot):
+            p = ICP.GetSignal('PICRN')
+            pt = ICP.GetTimebase('PICRN')
+            ind = np.where(p > 1e3)[0]
+            #embed()
+            if len(ind) != 0:
+                dt = (t[1]-t[0])
+                pt = pt[ind]
+                for i in xrange(len(t)):
+                    ddt = np.abs(t[i]-pt).min()
+                    if ddt < dt and i not in toRemove1:
+                        toRemove2.append(i)
+        return toRemove1+toRemove2
+        
+    def removeIncompatibleTimes(self, shot, t, gm, disallowedSources=(0,1,3), preserve_equidistance=True):
         # remove items where NBI1,2,4 were on/NBI3 off
         # make sure equal termporal spacing is preserved
-        toRemove = np.array(self.getIndicesIncompatibleWithNBI(shot, t, disallowedSources=disallowedSources))
+        if len(t) == 0:
+            return t, gm
+        toRemove = np.array(self.getIncompatibleIndices(shot, t, disallowedSources=disallowedSources))
+        #embed()
         gm2 = np.delete(gm, toRemove, axis=0)
         t2 = np.delete(t, toRemove)
-        t3 = np.arange(t2[0], t2[-1], t[1]-t[0])
-        gm3 = np.zeros((t3.shape[0], gm.shape[1]))
-        for i in range(gm.shape[1]):
-            gm3[:,i] = interp1d(t2, gm2[:,i])(t3)
-        return t3, gm3
+        if len(t2) > 1:
+            t3 = np.arange(t2[0], t2[-1], t[1]-t[0])
+            gm3 = np.zeros((t3.shape[0], gm.shape[1]))
+        else:
+            return np.array([]), np.array([])
+        if preserve_equidistance:
+            for i in range(gm.shape[1]):
+                gm3[:,i] = interp1d(t2, gm2[:,i])(t3)
+            return t3, gm3
+        else:
+            return t2, gm2
 
     def getErrgm(self, gmt, gm, gmtb, gmb):
         def rolling_window(a, window):
@@ -450,11 +492,12 @@ class MSAwriter(object):
             gm = gm[:, args.channel_order]
 
         if onlyNBI3:
-            gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
+            gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
         gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
         gmt, gm = self.fir(gmt, gm, args)
+        gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
         gm = self.onlyPlusMinus90(gm)
 
         print 'calculated MSE data shape (time, channels):', gm.shape
@@ -555,8 +598,9 @@ class MSAwriter(object):
             if args.channel_order != None:
                 gm = gm[:, args.channel_order]
 
-            gmt, gm = self.removeIncompatibleNBItimes(args.src_num, gmt, gm)
+            gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
             gmt, gm = self.fir(gmt, gm, args)
+            gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
             gm = self.onlyPlusMinus90(gm)
             lineObjects = plt.plot(gmt, gm)
@@ -565,7 +609,7 @@ class MSAwriter(object):
 
         leg = plt.legend(lineObjects, [l for l in labels], fontsize=10)
         for legobj in leg.legendHandles:
-            legobj.set_linewidth(2.0)
+            legobj.set_linewidth(6.0)
 
         NIS = dd.shotfile()
         if not NIS.Open('NIS', args.src_num):
@@ -591,7 +635,7 @@ class MSAwriter(object):
         plt.grid(True, 'both')
         
         ax = plt.gca()
-        badind = self.getIndicesIncompatibleWithNBI(args.src_num, gmtb)#, disallowedSource=(1,3))
+        badind = self.getIncompatibleIndices(args.src_num, gmtb)#, disallowedSource=(1,3))
         upper = np.ones(len(gmtb))*-100
         lower = np.ones(len(gmtb))*-100
         upper[badind] = 100
