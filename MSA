@@ -314,7 +314,7 @@ class MSAwriter(object):
         pem40, pem46 = sg1[:,15], sg1[:,14]
 
 
-        labels = ['pi' if l == 1 else 'sigma' if l != 0 else '' for l in srcPiSigma]
+        labels = ['pi' if l == 1 else 'sigma' if l == 2 else '' for l in srcPiSigma]
         nchan = len(labels) - labels.count('')
 
         # function to get data corresponding to MSA g_m entry <channel>        
@@ -356,11 +356,12 @@ class MSAwriter(object):
             mse.append(cmse)
 
         # construct configuration object
-        farofile = 'mse2014.txt'
-        if shot > 31776: farofile = 'mse2015.txt'
-        print('generating geometric information from FARO (lib/%s) and %s...'%(
-            farofile, ('MSX/CH-SETUP' if not channelSetupFile else channelSetupFile)))
-        rza = makeRzAs(os.path.dirname(os.path.realpath(__file__)) + '/lib/%s'%farofile)
+        #farofile = 'mse2014.txt'
+        year = 2014
+        if shot > 31776: year = 2015 #farofile = 'mse2015.txt'
+        #print('generating geometric information from FARO (lib/%s) and %s...'%(
+        #    farofile, ('MSX/CH-SETUP' if not channelSetupFile else channelSetupFile)))
+        rza = makeRzAs(year)
         R = np.zeros(nchan); dR = np.zeros(nchan)
         Z = np.zeros(nchan); dZ = np.zeros(nchan)
         A = np.zeros((nchan,10))
@@ -595,9 +596,9 @@ class MSAwriter(object):
 
             gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
-            if args.channel_order != None:
+            if args.channel_order is not None:
                 gm = gm[:, args.channel_order]
-
+                
             gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
             gmt, gm = self.fir(gmt, gm, args)
             gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
@@ -725,7 +726,7 @@ def main():
 
     try:
         if args.only_channels != None:
-            args.only_channels = np.array(args.channel_order.split(','), dtype=int) - 1
+            args.only_channels = np.array(args.only_channels.split(','), dtype=int) - 1
         else:
             args.only_channels = range(10)
     except Exception, e:
