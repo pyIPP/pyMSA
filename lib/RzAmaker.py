@@ -166,7 +166,7 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
     A10 = (-sR*sz*xpR + sR**2*xpz + st*(-sz*xpt + st*xpz))
 
     Asigma = np.array((A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)).T
-    Api = np.array((A6, A7, A8, A9, A10, A1, A2, A3, A4, A5)).T
+    Api = np.array((-A6, -A7, -A8, -A9, -A10, A1, A2, A3, A4, A5)).T
 
     output = Bunch(
                 R = np.zeros(60),
