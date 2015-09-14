@@ -317,7 +317,8 @@ class MSAwriter(object):
         labels = ['pi' if l == 1 else 'sigma' if l == 2 else '' for l in srcPiSigma]
         nchan = len(labels) - labels.count('')
 
-        # function to get data corresponding to MSA g_m entry <channel>        
+        # function to get data corresponding to MSA g_m entry <channel>
+        # valid up to 32065, check afterwards
         channelmap = [
             ('SG-1', 0, 'MSE  1'), # MSE box 1
             ('SG-1', 1, 'MSE  2'),
@@ -327,7 +328,7 @@ class MSAwriter(object):
             ('SG-1', 5, 'MSE  6'),
             ('SG-1', 6, 'MSE  7'),
             ('SG-1', 7, 'MSE  8'),
-            ('SG-1', 8, 'MSE  9'),
+            ('SG-1' if shot < 32066 else 'SG-2', 8, 'MSE  9'),
             ('SG-1', 9, 'MSE 10'), # MSE box 10
             ('SG-2', 0, 'MER  1'), # MER box 1
             ('SG-2', 6, 'MER  2'), # MER box 2

@@ -84,7 +84,7 @@ def getMSExperp(s0, s):
     vec /= norm(vec)
     return vec
 
-def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(60)):
+def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(60), withMSEvec=False):
     '''generates MSE R, z, A coords for pi and sigma from a FARO measurement'''
 
     s0, s = getLOSfromSPRD(int(year))
@@ -192,7 +192,13 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
     output.Asigma = Asigma[newOrder]
     output.Api = Api[newOrder]
 
-    return output
+    if withMSEvec:
+        Zmse = s
+        Ymse = cross(Zmse, xperp)
+        Xmse = cross(Ymse, Zmse)
+        return output, (Xmse, Ymse, Zmse, xperp)
+    else:
+        return output
 
 
 if __name__ == '__main__':
