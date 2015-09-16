@@ -330,8 +330,9 @@ class MSAwriter(object):
             ('SG-1', 7, 'MSE  8'),
             ('SG-1' if shot < 32066 else 'SG-2', 8, 'MSE  9'),
             ('SG-1', 9, 'MSE 10'), # MSE box 10
-            ('SG-2', 0, 'MER  1'), # MER box 1
-            ('SG-2', 6, 'MER  2'), # MER box 2
+            ('SG-2', 0 if shot < 32087 else 1, 'MER  1'), # MER box 1
+            ('SG-2', 6 if shot < 32087 else 2, 'MER  2'), # MER box 2
+            # MER 3/4 on SG-2;0/6, see logbook
         ]
         def getActualBox(channel, labels=np.array(labels)):
             return np.where(labels != '')[0][channel]
