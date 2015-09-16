@@ -165,8 +165,8 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
     A9  = (st**2*xpR + sz**2*xpR - sR*st*xpt - sR*sz*xpz)
     A10 = (-sR*sz*xpR + sR**2*xpz + st*(-sz*xpt + st*xpz))
 
-    Asigma = -np.array((A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)).T
-    Api    = -np.array((A6, A7, A8, A9, A10, -A1, -A2, -A3, -A4, -A5)).T
+    Api    = -np.array((A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)).T
+    Asigma = -np.array((A6, A7, A8, A9, A10, -A1, -A2, -A3, -A4, -A5)).T
 
     output = Bunch(
                 R = np.zeros(60),
@@ -214,8 +214,8 @@ if __name__ == '__main__':
         g_m = np.arctan2(A[:,1]*Bt + A[:,2]*Bz + A[:,4]*Ez, A[:,6]*Bt + A[:,7]*Bz + A[:,9]*Ez)
         return g_m/np.pi*180
 
-    embed()
-    sys.exit()
+    #embed()
+    #sys.exit()
 
     print 'old...'
     from RzAmakerOld import makeRzAs as oldmrsa
@@ -225,18 +225,21 @@ if __name__ == '__main__':
     Asigma2 = (asd2.Asigma[chans1] + asd2.Asigma[chans2]) / 2.
     Api = (asd.Api[chans1] + asd.Api[chans2]) / 2.
     Api2 = (asd2.Api[chans1] + asd2.Api[chans2]) / 2.
-    Alist = [('newsig', Asigma), ('oldsig', Asigma2)] #, ('newpi ', Api), ('oldpi ', Api2)]
-    for i in xrange(10):
-        for name, As in Alist:
-            print '%s %2i '%(name, i+1),
-            for j in xrange(10):
-                print '% 5.4f '%As[i, j],
-            print 
-            break
-        
+    #Alist = [('newsig', Asigma), ('oldsig', Asigma2)] #, ('newpi ', Api), ('oldpi ', Api2)]
+    #for i in xrange(10):
+    #    for name, As in Alist:
+    #        print '%s %2i '%(name, i+1),
+    #        for j in xrange(10):
+    #            print '% 5.4f '%As[i, j],
+    #        print 
+    #        #break
+    newsig = gammas(1,0,0, Asigma)
+    oldsig = gammas(1,0,0, Asigma2)
+    newpi = gammas(1,0,0, Api)
+    oldpi = gammas(1,0,0, Api2)
+    # note 4degree variation across minor radius between old and new angles
 
-
-    #embed()
+    embed()
 
 
 
