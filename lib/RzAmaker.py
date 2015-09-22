@@ -2,7 +2,6 @@
 import sys
 import numpy as np
 #import dd_20140409 as dd, ww_20140403 as ww
-import kk_abock as kk
 #import matplotlib.pyplot as plt; plt.ion()
 #import matplotlib as mpl
 #import argparse
@@ -43,12 +42,12 @@ def getApproxIntersections(s0, s1, v0, v1, beamSubdivisionLength):
     ''' determine MSE LsOS interections with NBI '''
     sn = norm(s1 - s0, axis=1)/beamSubdivisionLength
     vn = norm(v1 - v0)/beamSubdivisionLength
-    vmat = np.zeros((vn, 3))
+    vmat = np.zeros((int(vn), 3))
     for j in xrange(3):
         vmat[:,j] = np.linspace(v0[j], v1[j], vn)
     intersections = np.zeros_like(s0)
     for i in xrange(s0.shape[0]):
-        smat = np.zeros((sn[i], 3))
+        smat = np.zeros((int(sn[i]), 3))
         for j in xrange(3):
             smat[:,j] = np.linspace(s0[i,j], s1[i,j], sn[i])
         dmat = cdist(smat, vmat, 'euclidean') # calculates n*bn matrix of all distances
@@ -98,6 +97,7 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
     isecs = getApproxIntersections(s0, s1, v0, v1, beamSubdivisionLength)
 
     if plot:
+        import kk_abock as kk
         try:
             from mayavi import mlab # needs intel/12.1!!!!
         except Exception, e:
