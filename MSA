@@ -7,7 +7,7 @@ try:
     import os, sys
     import numpy as np
     import dd_20140409 as dd, ww_20140403 as ww
-    #from IPython import embed
+    from IPython import embed
     # modified mpl necessary
     #import site
     try:
@@ -39,7 +39,7 @@ except Exception, e:
     Please execute the following commands to connect to one and
     load the necessary prerequisites:
 
-    ssh qa01
+    ssh toks01
     setenv PYTHONPATH /afs/ipp/aug/ads-diags/common/python/lib
     module load intel python27/basic
     module switch intel/14.0
@@ -185,7 +185,7 @@ class MSAwriter(object):
 
     def _angleFromRawData(self, t, data, pem40, pem46, 
                           calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
-                          nfft=2048, shiftby=0, plot=False):
+                          nfft=2048, shiftby=0, plot=False, phase_reconstruction=True, aux=None):
         t0, dt = t[0], t[1] - t[0]
         if self.pem40a is None or self.pem46a is None: # do only once, then cache
             self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
@@ -203,13 +203,20 @@ class MSAwriter(object):
         i40 = i40s[np.average(I[i40s], axis=1).argmax()]
         i46 = i46s[np.average(I[i46s], axis=1).argmax()]
 
-        # use phase difference between pem reference signal and measured signal for intensity sign information
-        adiff40 = ((a[i40]-self.pem40a[i40])%(2*np.pi) > np.pi).astype(int)*2-1
-        adiff46 = ((a[i46]-self.pem46a[i46])%(2*np.pi) > np.pi).astype(int)*2-1
+        #if aux == 9:
+        #    embed()
 
-        # use sign from previous lines to create "negative" intensities for full arctan2 usage
-        I40 = np.sum(I[i40s], axis=0)**0.5 * adiff40
-        I46 = np.sum(I[i46s], axis=0)**0.5 * adiff46
+        if phase_reconstruction:
+            # use phase difference between pem reference signal and measured signal for intensity sign information
+            adiff40 = ((a[i40]-self.pem40a[i40])%(2*np.pi) > np.pi).astype(int)*2-1
+            adiff46 = ((a[i46]-self.pem46a[i46])%(2*np.pi) > np.pi).astype(int)*2-1
+
+            # use sign from previous lines to create "negative" intensities for full arctan2 usage
+            I40 = np.sum(I[i40s], axis=0)**0.5 * adiff40
+            I46 = np.sum(I[i46s], axis=0)**0.5 * adiff46
+        else:
+            I40 = np.sum(I[i40s], axis=0)**0.5
+            I46 = np.sum(I[i46s], axis=0)**0.5
 
         if plot:
             plt.plot(t, I40)
@@ -258,11 +265,12 @@ class MSAwriter(object):
             MBI.Close()
         return BTFt, BTFd
 
-    def readMSX(self, args, just_time=False):
+    def readMSX(self, args, just_time=False, all_raw=False, phase_reconstruction=True):
         exp = args.src_exp
         shot = args.src_num
         useCalibration=args.use_calibration
         upshiftPi=args.upshift_pi
+        no_b1 = args.no_b1
         channelSetupFile=args.chs_file
 
         if useCalibration:
@@ -276,7 +284,7 @@ class MSAwriter(object):
             if faraday_degree is None:
                 return False
             # get b1 absolute offset
-            b1 = MSC.GetParameter('C_Angle', 'b1')
+            b1 = 0 if no_b1 else MSC.GetParameter('C_Angle', 'b1') 
             MSC.Close(); del MSC
             # get BTF
             res = self.getBTF(shot)
@@ -286,10 +294,10 @@ class MSAwriter(object):
             
             BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)            
         else:
-            calib_factor = [0.8]*20
+            calib_factor = [0.81]*20
             faraday_degree = [-0.7]*20
             BTF = interp1d([-10, 100], [-2.5, -2.5], fill_value=-2.5, bounds_error=False)
-            b1 = 66.7
+            b1 = 0 if no_b1 else 66.7
 
         src = dd.shotfile()
         if not src.Open('MSX', shot, exp):
@@ -328,7 +336,7 @@ class MSAwriter(object):
             ('SG-1', 5, 'MSE  6'),
             ('SG-1', 6, 'MSE  7'),
             ('SG-1', 7, 'MSE  8'),
-            ('SG-1' if shot < 32066 else 'SG-2', 8, 'MSE  9'),
+            ('SG-1' if shot < 32066 or shot > 32123 else 'SG-2', 8, 'MSE  9'),
             ('SG-1', 9, 'MSE 10'), # MSE box 10
             ('SG-2', 0 if shot < 32087 else 1, 'MER  1'), # MER box 1
             ('SG-2', 6 if shot < 32087 else 2, 'MER  2'), # MER box 2
@@ -342,20 +350,36 @@ class MSAwriter(object):
             #print group, index
             return sg1[:,index] if group == 'SG-1' else sg2[:,index]
 
-        for ch in range(nchan):
-            if not just_time:
-                print '%2i/%2i' %(ch+1, nchan)
-            data = getData(ch)
+        if all_raw:
+            print 'returning raw data...'
+            for i in range(26):
+                print '%2i/%2i' %(i+1, 26)
+                data = sg1[:,i] if i < 16 else sg2[:,i-16]
+                mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
+                                                    0.81,
+                                                    0,
+                                                    BTF,
+                                                    0,
+                                                    shiftby=0,
+                                                    phase_reconstruction=phase_reconstruction, aux=i)
+                mse.append(cmse)
+  
+        else:
+            for ch in range(nchan):
+                if not just_time:
+                    print '%2i/%2i' %(ch+1, nchan)
+                data = getData(ch)
 
-            mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
-                                                calib_factor[getActualBox(ch)],
-                                                faraday_degree[getActualBox(ch)],
-                                                BTF,
-                                                b1,
-                                                shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0)
-            if just_time:
-                return mset, np.zeros([len(mset), nchan])
-            mse.append(cmse)
+                mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
+                                                    calib_factor[getActualBox(ch)],
+                                                    faraday_degree[getActualBox(ch)],
+                                                    BTF,
+                                                    b1,
+                                                    shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0,
+                                                    phase_reconstruction=phase_reconstruction)
+                if just_time:
+                    return mset, np.zeros([len(mset), nchan])
+                mse.append(cmse)
 
         # construct configuration object
         #farofile = 'mse2014.txt'
@@ -377,12 +401,12 @@ class MSAwriter(object):
                    np.average(rza.Api[   chInd], axis=0)
         pisigma = srcPiSigma[np.where(srcPiSigma != 0)[0]]
         labels = np.array(['%s %s'%(channelmap[getActualBox(i)][2], 'pi' if pisigma[i] == 1 else 'sigma') 
-                           for i in xrange(10)])
-
+                           for i in xrange(nchan)])
         o = R.argsort()[::-1] # order by R descending for easier usage
         config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], dR=dR[o], dZ=dZ[o], labels=list(labels[o]))
         print('done')
         
+        if all_raw: return (np.array(mset), np.array(mse).T, config)
         return (np.array(mset), np.array(mse)[o].T, config)
 
     def getIncompatibleIndices(self, shot, t, disallowedSources=(0,1,3)):
@@ -491,7 +515,7 @@ class MSAwriter(object):
             return False
         gmt, gm, cfg = res
 
-        if args.channel_order != None:
+        if args.channel_order is not None:
             gm = gm[:, args.channel_order]
 
         if onlyNBI3:
@@ -538,7 +562,7 @@ class MSAwriter(object):
         res[20] = vbeam # vbeam
         res[21] = cfg.pisigma #pisigma
 
-        return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num != None else args.src_num, res)
+        return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num is not None else args.src_num, res)
 
     def _movingAverage(self, signal, n):
         ret = np.cumsum(signal, dtype=float)
@@ -594,7 +618,7 @@ class MSAwriter(object):
             for i in xrange(gm.shape[1]):
                 print '%2i   %4.3f   %+4.3f  '%(i+1, cfg.R[i], cfg.z[i]), '  '.join('%+5.4f'%F for F in cfg.A[i] )
             
-            #embed()
+            embed()
 
             gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
@@ -707,27 +731,29 @@ def main():
     #    help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
     parser.add_argument('-fir', dest='fir', type=str, default='30,15,4',
         help='smooth using Kaiser FIR low pass filter, arguments: ripple,width,cutoffHz default: -fir 30,15,4')
-    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default='1,2,3,4,5,6,7,8,9,10',
+    parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     parser.add_argument('-po', '--plot-options', dest='plot_options', type=str, default='',
-        help='various plot options like -po xlim=0,7:ylim=-5,15:savefig:noshow')
+        help='various plot options like -po xlim=0,7:ylim=-5,15:savefig:noshow')    
+    parser.add_argument('-nb1', '--no-b1', dest='no_b1', action='store_true', default=False,
+        help="apply overall offset b1, default: yes")
     
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
     args = parser.parse_args()
 
-    if args.fir != None:
+    if args.fir is not None:
         args.fir = [float(k) for k in args.fir.split(',')]
     
     try:
-        if args.channel_order != None:
+        if args.channel_order is not None:
             args.channel_order = np.array(args.channel_order.split(','), dtype=int) - 1
     except Exception, e:
         raise e
 
     try:
-        if args.only_channels != None:
+        if args.only_channels is not None:
             args.only_channels = np.array(args.only_channels.split(','), dtype=int) - 1
         else:
             args.only_channels = range(10)
