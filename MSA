@@ -618,8 +618,6 @@ class MSAwriter(object):
             for i in xrange(gm.shape[1]):
                 print '%2i   %4.3f   %+4.3f  '%(i+1, cfg.R[i], cfg.z[i]), '  '.join('%+5.4f'%F for F in cfg.A[i] )
             
-            embed()
-
             gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
             if args.channel_order is not None:
