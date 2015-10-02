@@ -6,7 +6,7 @@
 try:
     import os, sys
     import numpy as np
-    import dd_20140409 as dd, ww_20140403 as ww
+    import dd_20140409 as dd
     from IPython import embed
     # modified mpl necessary
     #import site
@@ -54,15 +54,15 @@ except Exception, e:
 tmp = '''
 Black
 Red
-Blue
 Fuchsia
 Navy
+DarkGreen 
 Purple
 Maroon
 Olive
 Green
+Blue
 SeaGreen 
-DarkGreen 
 Gray
 Lime
 Aqua
@@ -127,12 +127,52 @@ class MSAwriter(object):
     def writeMSA(self, exp, shot, data):
         R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, dR, dZ, dZdR, \
         TMSA, gm, gm2, errgm, errgm2, vbeam, pisigma = data
-        
+
+        # libSFH can't change parameter size, so we must set max size via xsfed
+        # and simply fill it with 0s
+        maxsize = 40
+        npisigma = np.zeros(maxsize, int)
+        npisigma[:len(pisigma)] = pisigma
+
+       
+        nchan = len(R)
+
+        import ww_20140403 as ww, sfh_20151002 as sfh
+
         oldcwd = os.getcwd()
         if os.path.dirname(os.path.realpath(__file__)) != oldcwd:
             os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
         try:
+            # adjust shotfile header
+            head = sfh.shotfileHeader()
+            head.open('MSA00000.sfh')
+            nAreaTime = 1 #head.read_area_base('R')[1]
+            head.modify_area_base('R', nAreaTime, nchan)
+            head.modify_area_base('Z', nAreaTime, nchan)
+            head.modify_area_base('dR', nAreaTime, nchan)
+            head.modify_area_base('dZ', nAreaTime, nchan)
+            head.modify_area_base('dZdR', nAreaTime, nchan)
+            head.modify_area_base('A1', nAreaTime, nchan)
+            head.modify_area_base('A2', nAreaTime, nchan)
+            head.modify_area_base('A3', nAreaTime, nchan)
+            head.modify_area_base('A4', nAreaTime, nchan)
+            head.modify_area_base('A5', nAreaTime, nchan)
+            head.modify_area_base('A6', nAreaTime, nchan)
+            head.modify_area_base('A7', nAreaTime, nchan)
+            head.modify_area_base('A8', nAreaTime, nchan)
+            head.modify_area_base('A9', nAreaTime, nchan)
+            head.modify_area_base('A10', nAreaTime, nchan)
+            head.modify_index24('g_m', nchan)
+            head.modify_index24('g_m2', nchan)
+            head.modify_index24('err_g_m', nchan)
+            head.modify_index24('err_g_m2', nchan)
+            head.modify_qualifier_index('QUAL0001', nchan)
+            head.modify_qualifier_index('QUAL0002', nchan)
+            head.modify_qualifier_index('QUAL0003', nchan)
+            head.modify_qualifier_index('QUAL0004', nchan)
+            head.close()
+            # write data
             dest = ww.shotfile()
             dest.Open(experiment=exp, diagnostic='MSA', shotnumber=shot)
             #if not (dest.SetAreabase('R',  1, R) # old ww version has no feedback when writing...  
@@ -162,7 +202,7 @@ class MSAwriter(object):
             dest.SetSignalGroup('err_g_m', errgm.astype(np.float32))
             dest.SetSignalGroup('err_g_m2', errgm2.astype(np.float32))
             dest.SetParameter('misc', 'v_beam', np.float32(vbeam))
-            dest.SetParameter('misc', 'pi/sigma', pisigma)
+            dest.SetParameter('misc', 'pi/sigma', npisigma)
 
             dest.Close()
         except Exception, e:
@@ -185,7 +225,10 @@ class MSAwriter(object):
 
     def _angleFromRawData(self, t, data, pem40, pem46, 
                           calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
-                          nfft=2048, shiftby=0, plot=False, phase_reconstruction=True, aux=None):
+                          nfft=2048, shiftby=0, phase_reconstruction=True, aux=None, 
+                          plot=False, 
+                          exp_calib=False, column=None, with_intensity=False):
+
         t0, dt = t[0], t[1] - t[0]
         if self.pem40a is None or self.pem46a is None: # do only once, then cache
             self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
@@ -224,9 +267,16 @@ class MSAwriter(object):
             plt.show()
 
         toReturn = -np.arctan2(calib_factor*I40, I46)*180./np.pi*0.5 # second stokes component, thus *0.5
-        toReturn += faraday_strength*btf(t) + abs_offset
+        if exp_calib:
+            from lib.calib_func import getCalibFuncs
+            toReturn = getCalibFuncs()[column](toReturn)
         
-        return t, toReturn + shiftby
+        toReturn += faraday_strength*btf(t) # + abs_offset
+       
+        toReturn = [t, toReturn + shiftby]
+        if with_intensity: toReturn.append( np.sqrt(calib_factor**2*I40**2 + I46**2) )
+        
+        return toReturn
 
     def readChannelSetupFile(self, filename, useDefault=False):
         if useDefault:
@@ -352,23 +402,31 @@ class MSAwriter(object):
 
         if all_raw:
             print 'returning raw data...'
+            intensities = []
             for i in range(26):
                 print '%2i/%2i' %(i+1, 26)
                 data = sg1[:,i] if i < 16 else sg2[:,i-16]
-                mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
+                mset, cmse, intens = self._angleFromRawData(sg1t, data, pem40, pem46, 
                                                     0.81,
                                                     0,
                                                     BTF,
                                                     0,
                                                     shiftby=0,
-                                                    phase_reconstruction=phase_reconstruction, aux=i)
+                                                    phase_reconstruction=phase_reconstruction, aux=i,
+                                                    with_intensity=True)
                 mse.append(cmse)
+                intensities.append(intens)
   
         else:
+            #embed()
+            tmp = srcLOS.reshape(6,10)
             for ch in range(nchan):
                 if not just_time:
                     print '%2i/%2i' %(ch+1, nchan)
                 data = getData(ch)
+
+                ab = getActualBox(ch) + 1
+                column = [i for i in range(10) if ab in tmp[:,i]][0] + 1
 
                 mset, cmse = self._angleFromRawData(sg1t, data, pem40, pem46, 
                                                     calib_factor[getActualBox(ch)],
@@ -376,7 +434,8 @@ class MSAwriter(object):
                                                     BTF,
                                                     b1,
                                                     shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0,
-                                                    phase_reconstruction=phase_reconstruction)
+                                                    phase_reconstruction=phase_reconstruction,
+                                                    exp_calib=args.exp_calib, column=column)
                 if just_time:
                     return mset, np.zeros([len(mset), nchan])
                 mse.append(cmse)
@@ -406,7 +465,7 @@ class MSAwriter(object):
         config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], dR=dR[o], dZ=dZ[o], labels=list(labels[o]))
         print('done')
         
-        if all_raw: return (np.array(mset), np.array(mse).T, config)
+        if all_raw: return (np.array(mset), np.array(mse).T, config, np.array(intensities).T)
         return (np.array(mset), np.array(mse)[o].T, config)
 
     def getIncompatibleIndices(self, shot, t, disallowedSources=(0,1,3)):
@@ -553,7 +612,7 @@ class MSAwriter(object):
         res[11] = cfg.A[:,9]
         res[12] = cfg.dR
         res[13] = cfg.dZ
-        res[14] = np.array([0.]*10)
+        res[14] = np.array([0.]*len(res[13]))
         res[15] = gmt # TMSA
         res[16] = gm # gm
         res[17] = gm*0. # gm2
@@ -628,9 +687,10 @@ class MSAwriter(object):
             gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
             gm = self.onlyPlusMinus90(gm)
-            lineObjects = plt.plot(gmt, gm)
+            lineObjects = plt.plot(gmt, gm, lw=2)
             labels = cfg.labels
-            
+  
+        #embed()          
 
         leg = plt.legend(lineObjects, [l for l in labels], fontsize=10)
         for legobj in leg.legendHandles:
@@ -734,7 +794,9 @@ def main():
     parser.add_argument('-po', '--plot-options', dest='plot_options', type=str, default='',
         help='various plot options like -po xlim=0,7:ylim=-5,15:savefig:noshow')    
     parser.add_argument('-nb1', '--no-b1', dest='no_b1', action='store_true', default=False,
-        help="apply overall offset b1, default: yes")
+        help="apply overall offset b1, default: yes")    
+    parser.add_argument('-ec', '--exp-calib', dest='exp_calib', action='store_true', default=False,
+        help="use experimental calibration, default: no")
     
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
