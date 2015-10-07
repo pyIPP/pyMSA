@@ -385,8 +385,8 @@ class MSAwriter(object):
             ('SG-1', 4, 'MSE  5'),
             ('SG-1', 5, 'MSE  6'),
             ('SG-1', 6, 'MSE  7'),
-            ('SG-1', 7, 'MSE  8'),
-            ('SG-1' if shot < 32066 or shot > 32123 else 'SG-2', 8, 'MSE  9'),
+            ('SG-1', 7 if shot != 30841 else 8, 'MSE  8'),
+            ('SG-1' if shot < 32066 or shot > 32123 else 'SG-2', 8 if shot != 30841 else 7, 'MSE  9'),
             ('SG-1', 9, 'MSE 10'), # MSE box 10
             ('SG-2', 0 if shot < 32087 else 1, 'MER  1'), # MER box 1
             ('SG-2', 6 if shot < 32087 else 2, 'MER  2'), # MER box 2
@@ -760,6 +760,9 @@ class MSAwriter(object):
         if res == False:
             return False
         return self.writeMSA(args.dest_exp, args.dest_num, res)
+
+default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
+    fir=(30,15,4), no_b1=True)
 
 def main():
     possibleActions = ['replicate','write', 'plotMSA', 'plotMSX']
