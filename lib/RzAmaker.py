@@ -207,7 +207,7 @@ if __name__ == '__main__':
     #chans1 = [1, 7, 13, 19, 25, 31, 37, 43, 50, 57]
     #chans2 = [2, 8, 14, 20, 26, 32, 38, 44, 51, 58]
     print 'new...'
-    asd = makeRzAs(2015, plot=False)
+    asd = makeRzAs(2015, plot=True)
 
     A = (asd.Asigma[chans1] + asd.Asigma[chans2]) / 2.
     def gammas(Bt, Bz, Ez, A):

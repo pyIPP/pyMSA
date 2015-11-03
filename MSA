@@ -32,6 +32,7 @@ try:
     from lib.RzAmaker import makeRzAs
     from scipy.signal import kaiserord, lfilter, firwin
     from copy import copy
+    from scipy.optimize import curve_fit
 except Exception, e:
     print '    *** Error: %s'%e
     print ''' 
@@ -72,6 +73,12 @@ Teal
 # Yellow
 
 mpl.rcParams['axes.color_cycle'] = tmp.split()
+
+
+def sinfunc(x, a, b):
+    return np.sin(2*np.pi*a*(x + b))
+def cosfunc(x, a, b):
+    return np.cos(2*np.pi*a*(x + b))
 
 class Bunch(object):
     def __init__(self, **kwds):
@@ -126,7 +133,7 @@ class MSAwriter(object):
 
     def writeMSA(self, exp, shot, data):
         R, Z, A1, A2, A3, A4, A5, A6, A7, A8, A9, A10, dR, dZ, dZdR, \
-        TMSA, gm, gm2, errgm, errgm2, vbeam, pisigma = data
+        TMSA, gm, gm2, errgm, errgm2, vbeam, vbeam2, pisigma = data
 
         # libSFH can't change parameter size, so we must set max size via xsfed
         # and simply fill it with 0s
@@ -201,7 +208,7 @@ class MSAwriter(object):
             dest.SetSignalGroup('g_m2', gm2.astype(np.float32))
             dest.SetSignalGroup('err_g_m', errgm.astype(np.float32))
             dest.SetSignalGroup('err_g_m2', errgm2.astype(np.float32))
-            dest.SetParameter('misc', 'v_beam', np.float32(vbeam))
+            dest.SetParameter('misc', 'v_beam', np.array([vbeam, vbeam2]).astype(np.float32))
             dest.SetParameter('misc', 'pi/sigma', npisigma)
 
             dest.Close()
@@ -225,22 +232,32 @@ class MSAwriter(object):
 
     def _angleFromRawData(self, t, data, pem40, pem46, 
                           calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
-                          nfft=2048, shiftby=0, phase_reconstruction=True, aux=None, 
+                          nfft=None, shiftby=0, phase_reconstruction=True, aux=None, 
                           plot=False, 
-                          exp_calib=False, column=None, with_intensity=False):
+                          exp_calib=False, column=None, with_intensity=False, num=None):
+        nfft = 2048*4 if nfft is None else nfft
+        tcopy = copy(t)
 
         t0, dt = t[0], t[1] - t[0]
         if self.pem40a is None or self.pem46a is None: # do only once, then cache
             self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
             self.pem46a = specgram(pem46, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
+            np40 = pem40 - (max(pem40) + min(pem40)) / 2.
+            np40 /= max(np40)
+            popt40, pcov = curve_fit(sinfunc, tcopy[:1000], np40[:1000], p0 = [40e3, 0])
+            np46 = pem46 - (max(pem46) + min(pem46)) / 2.
+            np46 /= max(np46)
+            popt46, pcov = curve_fit(sinfunc, tcopy[:1000], np46[:1000], p0 = [46e3, 0])
+            self.f40 = popt40[0]
+            self.f46 = popt46[0]
 
         I, f, t = specgram(data, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='default')
         a, f, t = specgram(data, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')
         t += t0
 
         # 40-41 kHz, 46-47 kHz are the PEM harmonics we are interested in
-        i40s = np.intersect1d(np.where(40e3 < f)[0], np.where(f < 41e3)[0])
-        i46s = np.intersect1d(np.where(46e3 < f)[0], np.where(f < 47e3)[0])
+        i40s = np.intersect1d(np.where(self.f40 - 350 < f)[0], np.where(f < self.f40 + 350)[0])
+        i46s = np.intersect1d(np.where(self.f46 - 350 < f)[0], np.where(f < self.f46 + 350)[0])
 
         # indices of frequencies with maximum intensity
         i40 = i40s[np.average(I[i40s], axis=1).argmax()]
@@ -261,17 +278,53 @@ class MSAwriter(object):
             I40 = np.sum(I[i40s], axis=0)**0.5
             I46 = np.sum(I[i46s], axis=0)**0.5
 
-        if plot:
+        if False and num in (22, 23, 24, 25):
             plt.plot(t, I40)
             plt.plot(t, I46)
-            plt.show()
+            plt.show(True)
+
+        
+        if False and num in (22, 23, 24, 25):
+
+            #embed()
+
+            #li40a = np.cumsum(sinfunc(tcopy, popt40[0], popt40[1])*data)
+            #li40b = np.cumsum(cosfunc(tcopy, popt40[0], popt40[1])*data)
+
+            #li46a = np.cumsum(sinfunc(tcopy, popt46[0], popt46[1])*data)
+            #li46b = np.cumsum(cosfunc(tcopy, popt46[0], popt46[1])*data)
+
+            #dt = 0.006
+            #ni = round((tcopy[-1]-tcopy[0])/dt)
+            #si = len(tcopy)/ni
+            #nt = (np.cumsum(tcopy)[si::si] - np.cumsum(tcopy)[:-si:si])/si
+
+            #li40a = li40a[si::si] - li40a[:-si:si] 
+            #li40b = li40b[si::si] - li40b[:-si:si] 
+
+            #li46a = li46a[si::si] - li46a[:-si:si] 
+            #li46b = li46b[si::si] - li46b[:-si:si] 
+
+
+            #res = (li40a**2+li40b**2)/(li46a**2+li46b**2)
+
+            #plt.ion()
+            #plt.plot(t, I46, label='alt46')
+            #plt.plot(t, I40, label='al40t')
+            #plt.plot(nt, (li40a**2+li40b**2), label='neu40')
+            #plt.plot(nt, (li46a**2+li46b**2), label='neu46')
+            #plt.legend()
+
+            #sys.exit()
+
+            pass
 
         toReturn = -np.arctan2(calib_factor*I40, I46)*180./np.pi*0.5 # second stokes component, thus *0.5
         if exp_calib:
             from lib.calib_func import getCalibFuncs
             toReturn = getCalibFuncs()[column](toReturn)
         
-        toReturn += faraday_strength*btf(t) # + abs_offset
+        toReturn -= faraday_strength*btf(t) # + abs_offset
        
         toReturn = [t, toReturn + shiftby]
         if with_intensity: toReturn.append( np.sqrt(calib_factor**2*I40**2 + I46**2) )
@@ -315,13 +368,16 @@ class MSAwriter(object):
             MBI.Close()
         return BTFt, BTFd
 
-    def readMSX(self, args, just_time=False, all_raw=False, phase_reconstruction=True):
+    def readMSX(self, args, just_time=False, all_raw=False, phase_reconstruction=True, nfft=None):
         exp = args.src_exp
         shot = args.src_num
         useCalibration=args.use_calibration
         upshiftPi=args.upshift_pi
         no_b1 = args.no_b1
         channelSetupFile=args.chs_file
+
+        self.pem40a = None
+        self.pem46a = None
 
         if useCalibration:
             # get latest calib factor (p0)
@@ -407,13 +463,13 @@ class MSAwriter(object):
                 print '%2i/%2i' %(i+1, 26)
                 data = sg1[:,i] if i < 16 else sg2[:,i-16]
                 mset, cmse, intens = self._angleFromRawData(sg1t, data, pem40, pem46, 
-                                                    0.81,
+                                                    1.,
                                                     0,
                                                     BTF,
                                                     0,
                                                     shiftby=0,
                                                     phase_reconstruction=phase_reconstruction, aux=i,
-                                                    with_intensity=True)
+                                                    with_intensity=True, nfft=nfft, num=i)
                 mse.append(cmse)
                 intensities.append(intens)
   
@@ -435,7 +491,8 @@ class MSAwriter(object):
                                                     b1,
                                                     shiftby=90 if upshiftPi and labels[getActualBox(ch)] == 'pi' else 0,
                                                     phase_reconstruction=phase_reconstruction,
-                                                    exp_calib=args.exp_calib, column=column)
+                                                    exp_calib=args.exp_calib, column=column, num=ch,
+                                                    nfft=nfft)
                 if just_time:
                     return mset, np.zeros([len(mset), nchan])
                 mse.append(cmse)
@@ -509,7 +566,7 @@ class MSAwriter(object):
     def removeIncompatibleTimes(self, shot, t, gm, disallowedSources=(0,1,3), preserve_equidistance=True):
         # remove items where NBI1,2,4 were on/NBI3 off
         # make sure equal termporal spacing is preserved
-        if len(t) == 0:
+        if len(t) < 2:
             return t, gm
         toRemove = np.array(self.getIncompatibleIndices(shot, t, disallowedSources=disallowedSources))
         #embed()
@@ -586,40 +643,183 @@ class MSAwriter(object):
         gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
         gm = self.onlyPlusMinus90(gm)
 
+        errgm = self.getErrgm(gmt, gm, gmtb, gmb) # gm*0 + 0.2 # errgm
+
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
             plt.plot(gmt, gm)
             plt.show()
 
-        res = [None]*22
+        res = [None]*23
 
         # now set v_beam:
         NIS = dd.shotfile()
         if not NIS.Open('NIS', args.src_num):
             return False
         vbeam = np.sqrt(2*NIS.GetParameter('INJ1', 'UEXQ')[2]*1e3*1.602e-19 / 3.344e-27) # in m/s
-        res[0] = cfg.R
-        res[1] = cfg.z
-        res[2] = cfg.A[:,0]
-        res[3] = cfg.A[:,1]
-        res[4] = cfg.A[:,2]
-        res[5] = cfg.A[:,3]
-        res[6] = cfg.A[:,4]
-        res[7] = cfg.A[:,5]
-        res[8] = cfg.A[:,6]
-        res[9] = cfg.A[:,7]
-        res[10] = cfg.A[:,8]
-        res[11] = cfg.A[:,9]
-        res[12] = cfg.dR
-        res[13] = cfg.dZ
-        res[14] = np.array([0.]*len(res[13]))
-        res[15] = gmt # TMSA
-        res[16] = gm # gm
-        res[17] = gm*0. # gm2
-        res[18] = self.getErrgm(gmt, gm, gmtb, gmb) # gm*0 + 0.2 # errgm
-        res[19] = gm*0 + 180. # errgm2
-        res[20] = vbeam # vbeam
-        res[21] = cfg.pisigma #pisigma
+        vbeam2 = np.sqrt(2*NIS.GetParameter('INJ2', 'UEXQ')[3]*1e3*1.602e-19 / 3.344e-27) # in m/s
+
+        if args.src_num in (32194, 32232, 32342, 32427):
+            from lib.imse import getDataFromIMSE
+            if args.src_num == 32194:
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num)
+            elif args.src_num == 32232:
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.99, 6.14),
+                                                    regions_of_interest = [(1.54, 1.60, 0.01, 0.05),
+                                                                           (1.60, 1.66, 0.01, 0.05),
+                                                                           (1.66, 1.72, 0.01, 0.05),
+                                                                           (1.72, 1.78, 0.01, 0.05),
+                                                                           (1.78, 1.84, 0.01, 0.05),
+                                                                           (1.84, 1.90, 0.01, 0.05),
+                                                                           (1.90, 1.96, 0.01, 0.05),
+                                                                           (1.96, 2.02, 0.01, 0.05),
+                                                                           (2.02, 2.08, 0.01, 0.05),
+                                                                           (1.54, 1.60, 0.05, 0.09),
+                                                                           (1.60, 1.66, 0.05, 0.09),
+                                                                           (1.66, 1.72, 0.05, 0.09),
+                                                                           (1.72, 1.78, 0.05, 0.09),
+                                                                           (1.78, 1.84, 0.05, 0.09),
+                                                                           (1.84, 1.90, 0.05, 0.09),
+                                                                           (1.90, 1.96, 0.05, 0.09),
+                                                                           (1.96, 2.02, 0.05, 0.09),
+                                                                           (2.02, 2.08, 0.05, 0.09),
+                                                                           (1.54, 1.60, 0.09, 0.13),
+                                                                           (1.60, 1.66, 0.09, 0.13),
+                                                                           (1.66, 1.72, 0.09, 0.13),
+                                                                           (1.72, 1.78, 0.09, 0.13),
+                                                                           (1.78, 1.84, 0.09, 0.13),
+                                                                           (1.84, 1.90, 0.09, 0.13),
+                                                                           (1.90, 1.96, 0.09, 0.13),
+                                                                           (1.96, 2.02, 0.09, 0.13),
+                                                                           (2.02, 2.08, 0.09, 0.13)]) 
+            elif args.src_num == 32342:
+                # for i in range(14):
+                #    print '(%3.2f, %3.2f, 0.04, 0.08),'%(1.5+i*0.04, 1.5+(i+1)*0.04)
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.2, 3.5),
+                                                    regions_of_interest = [(1.50, 1.54, 0.04, 0.08),
+                                                                           (1.54, 1.58, 0.04, 0.08),
+                                                                           (1.58, 1.62, 0.04, 0.08),
+                                                                           (1.62, 1.66, 0.04, 0.08),
+                                                                           (1.66, 1.70, 0.04, 0.08),
+                                                                           (1.70, 1.74, 0.04, 0.08),
+                                                                           (1.74, 1.78, 0.04, 0.08),
+                                                                           (1.78, 1.82, 0.04, 0.08),
+                                                                           (1.82, 1.86, 0.04, 0.08),
+                                                                           (1.86, 1.90, 0.04, 0.08),
+                                                                           (1.90, 1.94, 0.04, 0.08),
+                                                                           (1.94, 1.98, 0.04, 0.08),
+                                                                           (1.98, 2.02, 0.04, 0.08),
+                                                                           (2.02, 2.06, 0.04, 0.08),])
+            elif args.src_num == 32427:
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.6, 5.8),
+                                                    regions_of_interest = [(1.50, 1.54, 0.04, 0.08),
+                                                                           (1.54, 1.58, 0.04, 0.08),
+                                                                           (1.58, 1.62, 0.04, 0.08),
+                                                                           (1.62, 1.66, 0.04, 0.08),
+                                                                           (1.66, 1.70, 0.04, 0.08),
+                                                                           (1.70, 1.74, 0.04, 0.08),
+                                                                           (1.74, 1.78, 0.04, 0.08),
+                                                                           (1.78, 1.82, 0.04, 0.08),
+                                                                           (1.82, 1.86, 0.04, 0.08),
+                                                                           (1.86, 1.90, 0.04, 0.08),
+                                                                           (1.90, 1.94, 0.04, 0.08),
+                                                                           (1.94, 1.98, 0.04, 0.08),
+                                                                           (1.98, 2.02, 0.04, 0.08),
+                                                                           (2.02, 2.06, 0.04, 0.08),])
+                import dd as dd_latest
+                nis = dd_latest.shotfile('NIS', args.src_num)
+                p5 = nis('PNIQ').data[:,0,1]
+                p5t = nis('PNIQ').time
+
+                for i, t in enumerate(it):
+                    if p5[np.abs(p5t-t).argmin()] > 10:
+                        iunc[i, :] = 1.e4
+
+                #embed()
+                #sys.exit()             
+
+            nIMSE = len(iR)
+            nMSE = len(cfg.R)
+
+            comb_R = np.zeros(nMSE+nIMSE)
+            comb_R[:nMSE] = cfg.R
+            comb_R[nMSE:] = iR
+
+            comb_z = np.zeros(nMSE+nIMSE)
+            comb_z[:nMSE] = cfg.z
+            comb_z[nMSE:] = iz
+
+            comb_dR = np.zeros(nMSE+nIMSE)
+            comb_dR[:nMSE] = cfg.dR
+            comb_dR[nMSE:] = nIMSE*[0.03]
+
+            comb_dZ = np.zeros(nMSE+nIMSE)
+            comb_dZ[:nMSE] = cfg.dZ
+            comb_dZ[nMSE:] = nIMSE*[0.02]
+
+            comb_A = np.zeros((nMSE+nIMSE, 10))
+            comb_A[:nMSE] = cfg.A
+            comb_A[nMSE:] = iAs
+
+            comb_gm = np.zeros((len(gmt), nMSE+nIMSE))
+            comb_gm[:,:nMSE] = gm
+            comb_gm[:,nMSE:] = interp1d(it, igm.T, bounds_error=False, fill_value=0)(gmt).T
+
+            comb_errgm = np.zeros((len(gmt), nMSE+nIMSE))
+            comb_errgm[:, :nMSE] = errgm
+            comb_errgm[:, nMSE:] = interp1d(it, iunc.T, bounds_error=False, fill_value=iunc.max())(gmt).T
+
+            res[0] = comb_R
+            res[1] = comb_z
+            res[2] = comb_A[:,0]
+            res[3] = comb_A[:,1]
+            res[4] = comb_A[:,2]
+            res[5] = comb_A[:,3]
+            res[6] = comb_A[:,4]
+            res[7] = comb_A[:,5]
+            res[8] = comb_A[:,6]
+            res[9] = comb_A[:,7]
+            res[10] = comb_A[:,8]
+            res[11] = comb_A[:,9]
+            res[12] = comb_dR
+            res[13] = comb_dZ
+            res[14] = np.array([0.]*len(res[13])) # dRdZ
+            res[15] = gmt # TMSA
+            res[16] = comb_gm # gm
+            res[17] = comb_gm*0. # gm2
+            res[18] = comb_errgm # errgm
+            res[19] = comb_gm*0 + 180. # errgm2
+            res[20] = vbeam # vbeam
+            res[21] = vbeam2 # vbeam
+            res[22] = np.array(list(cfg.pisigma) + nIMSE*[3]) #pisigma
+
+            #embed()
+            #sys.exit()
+        else:
+            res[0] = cfg.R
+            res[1] = cfg.z
+            res[2] = cfg.A[:,0]
+            res[3] = cfg.A[:,1]
+            res[4] = cfg.A[:,2]
+            res[5] = cfg.A[:,3]
+            res[6] = cfg.A[:,4]
+            res[7] = cfg.A[:,5]
+            res[8] = cfg.A[:,6]
+            res[9] = cfg.A[:,7]
+            res[10] = cfg.A[:,8]
+            res[11] = cfg.A[:,9]
+            res[12] = cfg.dR
+            res[13] = cfg.dZ
+            res[14] = np.array([0.]*len(res[13])) # dRdZ
+            res[15] = gmt # TMSA
+            res[16] = gm # gm
+            res[17] = gm*0. # gm2
+            res[18] = errgm
+            res[19] = gm*0 + 180. # errgm2
+            res[20] = vbeam # vbeam
+            res[21] = vbeam2 # vbeam
+            res[22] = cfg.pisigma #pisigma
+
 
         return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num is not None else args.src_num, res)
 
