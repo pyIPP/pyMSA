@@ -7,6 +7,8 @@ try:
     import os, sys
     import numpy as np
     import dd_20140409 as dd
+    #import dd_20160311 as dd
+    from bisect import bisect_left
     from IPython import embed
     # modified mpl necessary
     #import site
@@ -625,7 +627,7 @@ class MSAwriter(object):
         return uncs
 
 
-    def write(self, args, onlyNBI3=True, showPlot=False):
+    def write(self, args, onlyNBI3=True, showPlot=False, correct=False):
         res = self.readMSX(args)
         if res == False:
             return False
@@ -644,6 +646,9 @@ class MSAwriter(object):
         gm = self.onlyPlusMinus90(gm)
 
         errgm = self.getErrgm(gmt, gm, gmtb, gmb) # gm*0 + 0.2 # errgm
+
+        if correct:
+            gm = self.correct(args, gmt, gm) # corrected angles
 
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
@@ -820,7 +825,7 @@ class MSAwriter(object):
             res[21] = vbeam2 # vbeam
             res[22] = cfg.pisigma #pisigma
 
-
+        #embed()
         return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num is not None else args.src_num, res)
 
     def _movingAverage(self, signal, n):
@@ -960,14 +965,53 @@ class MSAwriter(object):
         if res == False:
             return False
         return self.writeMSA(args.dest_exp, args.dest_num, res)
+        
+    def correct(self, args, time, gm):
+        # gives corrected angles back to MSAwriter
+        import dd_20160311 as dd
+        params = np.load('./lib/Parameters2016.npy')
+        faradayRotation = np.load('./lib/FaradayEffekt2016.npy')
+        vacuumEffect = np.load('./lib/VacuumEffect2016.npy')
+        correctAngles = []
+        # for Btor changes with time it is necessary to compare time bases of MSA and MAI
+        MAI = dd.shotfile('MAI', args.src_num, 'AUGD')
+        maiTime = MAI.getObjectData('T-MAG-1')
+        msaTime = time
+        btf = MAI.getObjectData('BTF')
+        newgm = []
+        for i, los in enumerate(gm.T):
+            angles = []
+            for chan in params:
+                if chan[0]==i+2:
+                    angle = chan[6]*los+chan[7]*np.sin(2*los*np.pi/180.+chan[10])+chan[8]*np.sin(4*los*np.pi/180.+chan[11])+chan[5]-chan[4]-chan[9]
+                    angles.append(angle)
+            if len(angles) == 0:
+                continue
+            for j, ang in enumerate(angles):
+                if j==0:
+                    sum_ = ang
+                else:
+                    sum_ += ang
+            mean = sum_/len(angles)
+            try:
+                for tind, datapoint in enumerate(mean): # faraday effect
+                    tpoint = msaTime[tind]
+                    ind = bisect_left(list(maiTime), tpoint)
+                    Btor = btf[ind]
+                    datapoint -= Btor*faradayRotation[i+2][1]
+            except Exception:
+                pass
+            mean -= vacuumEffect[0][0] # vacuum effect
+            newgm.append(mean) 
+        return np.array(newgm).T
 
 default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
     fir=(30,15,4), no_b1=True)
 
 def main():
-    possibleActions = ['replicate','write', 'plotMSA', 'plotMSX']
+    possibleActions = ['replicate','write', 'plotMSA', 'plotMSX', 'write_corrected']
     paexpl = ['re-write existing MSA file', 'write MSA file from MSX file',
-        'read and plot MSA file', 'compute angles from MSX and only plot']
+        'read and plot MSA file', 'compute angles from MSX and only plot', 'write MSA file with total calibrated angles']
 
     parser = argparse.ArgumentParser(description='Handle MSX data.')
     parser.add_argument('-sn', '--src-num', type=int, required=True,
@@ -1036,6 +1080,10 @@ def main():
             return False
     elif args.action == 'write':
         if not writer.write(args, onlyNBI3=(not args.ignore_NBI124)):
+            print 'something went wrong :-('
+            return False
+    elif args.action == 'write_corrected':
+        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124), correct=True):
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
