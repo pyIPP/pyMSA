@@ -998,11 +998,11 @@ class MSAwriter(object):
                     tpoint = msaTime[tind]
                     ind = bisect_left(list(maiTime), tpoint)
                     Btor = btf[ind]
-                    datapoint -= Btor*faradayRotation[i+2][1]
+                    datapoint += Btor*faradayRotation[i+2][1]
             except Exception:
                 pass
             mean -= vacuumEffect[0][0] # vacuum effect
-            newgm.append(mean) 
+            newgm.append(mean)
         return np.array(newgm).T
 
 default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
