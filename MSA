@@ -147,7 +147,6 @@ class MSAwriter(object):
         nchan = len(R)
 
         import ww_20140403 as ww, sfh_20151002 as sfh
-
         oldcwd = os.getcwd()
         if os.path.dirname(os.path.realpath(__file__)) != oldcwd:
             os.chdir(os.path.dirname(os.path.realpath(__file__)))
@@ -233,7 +232,7 @@ class MSAwriter(object):
     pem40a, pem46a = None, None
 
     def _angleFromRawData(self, t, data, pem40, pem46, 
-                          calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
+                          calib_factor=1, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
                           nfft=None, shiftby=0, phase_reconstruction=True, aux=None, 
                           plot=False, 
                           exp_calib=False, column=None, with_intensity=False, num=None):
@@ -992,8 +991,6 @@ class MSAwriter(object):
         new_btf = interp1d(maiTime, btf)(time)
         
         new_gm = []
-        #test = []
-        #test1 = []
         for i in range(gm.shape[1]):
             param_ind = []
             for j in range(len(config.raw_R[i])):
@@ -1001,91 +998,15 @@ class MSAwriter(object):
                 raw_Z = config.raw_z[i][j]
                 param_ind.append((np.sqrt((params_arr[:,2]-raw_R)**2 + (params_arr[:,3]-raw_Z)**2)).argmin())
             bmeas, bcalc, a, b, c, d, p1, p2 =  np.average(params_arr[param_ind],axis=0)[4:12]
-            #bmeas_, bcalc_, a_, b_, c_, d_, p1_, p2_ =  params_arr[param_ind[0]][4:12]
-            #bmeas_1, bcalc_1, a_1, b_1, c_1, d_1, p1_1, p2_1 =  params_arr[param_ind[1]][4:12]
             cols = [p[0] for p in params_arr[param_ind]]            
             faraday_rotation = np.average([f[1] for f in faradayRotation if f[0] in cols])
             gt = np.linspace(-180, 180, 720*1000)
             gm2gt = interp1d(a*gt+b*np.sin(2*gt*np.pi/180.+p1)+c*np.sin(4*gt*np.pi/180.+p2)+d, gt)
-            #testi = interp1d(a_*gt+b_*np.sin(2*gt*np.pi/180.+p1_)+c_*np.sin(4*gt*np.pi/180.+p2_)+d_, gt)
-            #testi_= interp1d(a_1*gt+b_1*np.sin(2*gt*np.pi/180.+p1_1)+c_1*np.sin(4*gt*np.pi/180.+p2_1)+d_1, gt)
-            #test.append(testi(gm[:,i]))
-            #test1.append(testi_(gm[:,i]))
             new_gm.append(gm2gt(gm[:,i]))
-            #test[-1] -= new_btf*faraday_rotation
-            #test[-1] += vacuumEffect[0][0]
-            #test1[-1] -= new_btf*faraday_rotation
-            #test1[-1] += vacuumEffect[0][0]
             new_gm[-1] -= new_btf*faraday_rotation
             new_gm[-1] += vacuumEffect[0][0]
-        #test1 = np.array(test1).T
-        #test = np.array(test).T
         new_gm = np.array(new_gm).T
-                
-        '''newgm = []
-        # mapping
-        allR1 = []
-        allz1 = []
-        for R in config.raw_R:
-            allR1.append(R[0])
-            allR1.append(R[1])
-        for z in config.raw_z:
-            allz1.append(z[0])
-            allz1.append(z[1])
-        allR2 = []
-        allz2 = []
-        for param in params:
-            allR2.append(param[2])
-            allz2.append(param[3])
-        listofminind = []
-        for i, R1 in enumerate(allR1):
-            min_ = 1e10
-            for j, R2 in enumerate(allR2):
-                if np.linalg.norm(np.array([R1, allz1[i]])- np.array([R2, allz2[j]]))<min_:
-                    min_ = np.linalg.norm(np.array([R1, allz1[i]])- np.array([R2, allz2[j]]))
-                    minind = j
-            listofminind.append(minind)
-        alla = []
-        allb = []
-        allc = []
-        alld = []
-        allp1 = []
-        allp2 = []
-        avpos = []
-        for i, ind in enumerate(listofminind[::2]):
-            alla.append((params[ind][6]+params[listofminind][2*i+1][6])/2)
-            allb.append((params[ind][7]+params[listofminind][2*i+1][7])/2)
-            allc.append((params[ind][8]+params[listofminind][2*i+1][8])/2)
-            alld.append((params[ind][5]+params[listofminind][2*i+1][5])/2-(params[ind][4]+params[listofminind][2*i+1][4])/2
-                                                                         -(params[ind][9]+params[listofminind][2*i+1][9])/2)
-            allp1.append((params[ind][10]+params[listofminind][2*i+1][10])/2)
-            allp2.append((params[ind][11]+params[listofminind][2*i+1][11])/2)
-            avpos.append(((allR2[ind]+allR2[ind+1])/2, (allz2[ind]+allz2[ind+1])/2))
-        for i, los in enumerate(gm.T):
-            gmR = config.R[i]
-            gmz = config.z[i]
-            min_ = 1e10
-            for j, (R, z) in enumerate(avpos):
-                if np.linalg.norm(np.array([gmR, gmz])-np.array([R,z]))<min_:
-                    min_ = np.linalg.norm(np.array([gmR, gmz])-np.array([R,z]))
-                    ind = j
-            angle = alla[ind]*los+allb[ind]*np.sin(2*los*np.pi/180.+allp1[ind])+allc[ind]*np.sin(4*los*np.pi/180.+allp2[ind])+alld[ind]
-            try:
-                for tind, datapoint in enumerate(angle): # faraday effect
-                    tpoint = msaTime[tind]
-                    _ind = bisect_left(list(maiTime), tpoint)
-                    Btor = btf[_ind]
-                    angle[tind] += Btor*faradayRotation[ind][1]
-            except IndexError: # last channel has no faraday rotation
-                for tind, datapoint in enumerate(angle): # faraday effect
-                    tpoint = msaTime[tind]
-                    _ind = bisect_left(list(maiTime), tpoint)
-                    Btor = btf[_ind]
-                    angle[tind] += Btor*faradayRotation[-1][1]
-            angle -= vacuumEffect[0][0] # vacuum effect
-            
-            newgm.append(angle)'''
-        return np.array(new_gm).T
+        return np.array(new_gm)
 
 default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
     fir=(30,15,4), no_b1=True)
@@ -1164,7 +1085,8 @@ def main():
         if not writer.write(args, onlyNBI3=(not args.ignore_NBI124)):
             print 'something went wrong :-('
             return False
-    elif args.action == 'write_corrected':
+    elif args.action == 'write_corrected':  
+        args.use_calibration = False
         if not writer.write(args, onlyNBI3=(not args.ignore_NBI124), correct=True):
             print 'something went wrong :-('
             return False
