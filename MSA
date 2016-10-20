@@ -7,6 +7,8 @@ try:
     import os, sys
     import numpy as np
     import dd_20140409 as dd
+    #import dd_20160311 as dd
+    from bisect import bisect_left
     from IPython import embed
     # modified mpl necessary
     #import site
@@ -145,7 +147,6 @@ class MSAwriter(object):
         nchan = len(R)
 
         import ww_20140403 as ww, sfh_20151002 as sfh
-
         oldcwd = os.getcwd()
         if os.path.dirname(os.path.realpath(__file__)) != oldcwd:
             os.chdir(os.path.dirname(os.path.realpath(__file__)))
@@ -231,7 +232,7 @@ class MSAwriter(object):
     pem40a, pem46a = None, None
 
     def _angleFromRawData(self, t, data, pem40, pem46, 
-                          calib_factor=0.8, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
+                          calib_factor=1, faraday_strength=0, btf=lambda x: 2.5, abs_offset=66.7,
                           nfft=None, shiftby=0, phase_reconstruction=True, aux=None, 
                           plot=False, 
                           exp_calib=False, column=None, with_intensity=False, num=None):
@@ -407,9 +408,14 @@ class MSAwriter(object):
             BTFt, BTFd = res
             
             BTF = interp1d(BTFt, BTFd, fill_value=np.average(BTFd), bounds_error=False)            
+        #else:
+        #    calib_factor = [0.81]*20
+        #    faraday_degree = [-0.7]*20
+        #    BTF = interp1d([-10, 100], [-2.5, -2.5], fill_value=-2.5, bounds_error=False)
+        #    b1 = 0 if no_b1 else 66.7
         else:
-            calib_factor = [0.81]*20
-            faraday_degree = [-0.7]*20
+            calib_factor = [1.0]*20
+            faraday_degree = [0.0]*20
             BTF = interp1d([-10, 100], [-2.5, -2.5], fill_value=-2.5, bounds_error=False)
             b1 = 0 if no_b1 else 66.7
 
@@ -515,6 +521,8 @@ class MSAwriter(object):
         R = np.zeros(nchan); dR = np.zeros(nchan)
         Z = np.zeros(nchan); dZ = np.zeros(nchan)
         A = np.zeros((nchan,10))
+        Rs = []
+        Zs = []
         for i in xrange(nchan):
             chInd = np.where(srcLOS == getActualBox(i) + 1)
             R[i] = np.average(rza.R[chInd])
@@ -523,11 +531,13 @@ class MSAwriter(object):
             dZ[i] = np.std(rza.z[chInd])
             A[i] = np.average(rza.Asigma[chInd], axis=0) if labels[getActualBox(i)] == 'sigma' else \
                    np.average(rza.Api[   chInd], axis=0)
+            Rs.append(rza.R[chInd])
+            Zs.append(rza.z[chInd])
         pisigma = srcPiSigma[np.where(srcPiSigma != 0)[0]]
         labels = np.array(['%s %s'%(channelmap[getActualBox(i)][2], 'pi' if pisigma[i] == 1 else 'sigma') 
                            for i in xrange(nchan)])
         o = R.argsort()[::-1] # order by R descending for easier usage
-        config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], dR=dR[o], dZ=dZ[o], labels=list(labels[o]))
+        config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], dR=dR[o], dZ=dZ[o], labels=list(labels[o]), raw_R=Rs, raw_z=Zs)
         print('done')
         
         if all_raw: return (np.array(mset), np.array(mse).T, config, np.array(intensities).T)
@@ -634,10 +644,11 @@ class MSAwriter(object):
         return uncs
 
 
-    def write(self, args, onlyNBI3=True, showPlot=False):
+    def write(self, args, onlyNBI3=True, showPlot=False, correct=False):
         res = self.readMSX(args)
         if res == False:
             return False
+        #embed()
         gmt, gm, cfg = res
 
         if args.channel_order is not None:
@@ -654,6 +665,9 @@ class MSAwriter(object):
         gm = self.onlyPlusMinus90(gm)
 
         errgm = self.getErrgm(gmt, gm, gmtb, gmb) # gm*0 + 0.2 # errgm
+
+        if correct:
+            gm = self.correct(args, gmt, gm, cfg) # corrected angles
 
         print 'calculated MSE data shape (time, channels):', gm.shape
         if showPlot:
@@ -781,7 +795,7 @@ class MSAwriter(object):
             res[21] = vbeam2 # vbeam
             res[22] = cfg.pisigma #pisigma
 
-
+        #embed()
         return self.writeMSA(args.dest_exp, args.dest_num if args.dest_num is not None else args.src_num, res)
 
     def _movingAverage(self, signal, n):
@@ -924,14 +938,47 @@ class MSAwriter(object):
         if res == False:
             return False
         return self.writeMSA(args.dest_exp, args.dest_num, res)
+        
+    def correct(self, args, time, gm, config):
+        # gives corrected angles back to MSAwriter
+        import dd_20160311 as dd
+        params = np.load('./lib/Parameters2016.npy')
+        params_arr = np.array([list(p) for p in params])
+        faradayRotation = np.load('./lib/FaradayEffekt2016.npy')
+        vacuumEffect = np.load('./lib/VacuumEffect2016.npy')
+        correctAngles = []
+        # for Btor changes with time it is necessary to compare time bases of MSA and MAI
+        MAI = dd.shotfile('MAI', args.src_num, 'AUGD')
+        maiTime = MAI.getObjectData('T-MAG-1')
+        msaTime = time
+        btf = MAI.getObjectData('BTF')
+        new_btf = interp1d(maiTime, btf)(time)
+        
+        new_gm = []
+        for i in range(gm.shape[1]):
+            param_ind = []
+            for j in range(len(config.raw_R[i])):
+                raw_R = config.raw_R[i][j]
+                raw_Z = config.raw_z[i][j]
+                param_ind.append((np.sqrt((params_arr[:,2]-raw_R)**2 + (params_arr[:,3]-raw_Z)**2)).argmin())
+            bmeas, bcalc, a, b, c, d, p1, p2 =  np.average(params_arr[param_ind],axis=0)[4:12]
+            cols = [p[0] for p in params_arr[param_ind]]            
+            faraday_rotation = np.average([f[1] for f in faradayRotation if f[0] in cols])
+            gt = np.linspace(-180, 180, 720*1000)
+            gm2gt = interp1d(a*gt+b*np.sin(2*gt*np.pi/180.+p1)+c*np.sin(4*gt*np.pi/180.+p2)+d, gt)
+            new_gm.append(gm2gt(gm[:,i]))
+            new_gm[-1] -= new_btf*faraday_rotation
+            new_gm[-1] += vacuumEffect[0][0]
+        new_gm = np.array(new_gm).T
+        return np.array(new_gm)
 
 default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
     fir=(30,15,4), no_b1=True)
 
 def main():
-    possibleActions = ['replicate','write', 'plotMSA', 'plotMSX']
+    possibleActions = ['replicate','write', 'plotMSA', 'plotMSX', 'write_corrected']
     paexpl = ['re-write existing MSA file', 'write MSA file from MSX file',
-        'read and plot MSA file', 'compute angles from MSX and only plot']
+        'read and plot MSA file', 'compute angles from MSX and only plot', 'write MSA file with total calibrated angles']
 
     parser = argparse.ArgumentParser(description='Handle MSX data.')
     parser.add_argument('-sn', '--src-num', type=int, required=True,
@@ -1000,6 +1047,11 @@ def main():
             return False
     elif args.action == 'write':
         if not writer.write(args, onlyNBI3=(not args.ignore_NBI124)):
+            print 'something went wrong :-('
+            return False
+    elif args.action == 'write_corrected':  
+        args.use_calibration = False
+        if not writer.write(args, onlyNBI3=(not args.ignore_NBI124), correct=True):
             print 'something went wrong :-('
             return False
     elif args.action in ('plotMSA', 'plotMSX'):
