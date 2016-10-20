@@ -238,18 +238,26 @@ class MSAwriter(object):
         nfft = 2048*4 if nfft is None else nfft
         tcopy = copy(t)
 
-        t0, dt = t[0], t[1] - t[0]
+        t0, dt = t[0], np.average(np.gradient(tcopy))
         if self.pem40a is None or self.pem46a is None: # do only once, then cache
             self.pem40a = specgram(pem40, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
             self.pem46a = specgram(pem46, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')[0]
             np40 = pem40 - (max(pem40) + min(pem40)) / 2.
             np40 /= max(np40)
-            popt40, pcov = curve_fit(sinfunc, tcopy[:1000], np40[:1000], p0 = [40e3, 0])
+            #plt.plot(tcopy[:1000], np40[:1000])
+            #plt.show()
+            #popt40, pcov = curve_fit(sinfunc, tcopy[:1000], np40[:1000], p0 = [40e3, 0])
             np46 = pem46 - (max(pem46) + min(pem46)) / 2.
             np46 /= max(np46)
-            popt46, pcov = curve_fit(sinfunc, tcopy[:1000], np46[:1000], p0 = [46e3, 0])
-            self.f40 = popt40[0]
-            self.f46 = popt46[0]
+            #popt46, pcov = curve_fit(sinfunc, tcopy[:1000], np46[:1000], p0 = [46e3, 0])
+            #self.f40 = popt40[0]
+            #self.f46 = popt46[0]     
+            Fs = 1/dt
+            ref_nfft = 2**int(np.log2((t[-1]-t[0])*Fs))
+            spec, f, ft = specgram(np40, Fs=Fs, NFFT=ref_nfft)
+            self.f40 = f[spec[:,0].argmax()]
+            spec, f, ft = specgram(np46, Fs=Fs, NFFT=ref_nfft)
+            self.f46 = f[spec[:,0].argmax()]
 
         I, f, t = specgram(data, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='default')
         a, f, t = specgram(data, NFFT=nfft, Fs=1./dt, noverlap=nfft/2, mode='angle')
@@ -579,7 +587,7 @@ class MSAwriter(object):
             return np.array([]), np.array([])
         if preserve_equidistance:
             for i in range(gm.shape[1]):
-                gm3[:,i] = interp1d(t2, gm2[:,i])(t3)
+                gm3[:,i] = interp1d(t2, gm2[:,i], bounds_error=False, fill_value=np.average(gm2[:,i]))(t3)
             return t3, gm3
         else:
             return t2, gm2
@@ -604,6 +612,7 @@ class MSAwriter(object):
             t2use2 = t2use[n/2:-n/2+1]
             s = np.std(rolling_window(diff, n), 1)
             s[np.where(s > 2.0)] = 180
+            s[np.where(s < 0.2)] = 0.2 # minimum std error
             unc = interp1d(t2use2, s, bounds_error=False, fill_value=180.)
             uncs[:,i] = unc(gmt)
             if False: # plot single channel and uncertainty
@@ -640,7 +649,8 @@ class MSAwriter(object):
         gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
         gmt, gm = self.fir(gmt, gm, args)
-        gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
+        if onlyNBI3:
+            gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
         gm = self.onlyPlusMinus90(gm)
 
         errgm = self.getErrgm(gmt, gm, gmtb, gmb) # gm*0 + 0.2 # errgm
@@ -659,73 +669,20 @@ class MSAwriter(object):
         vbeam = np.sqrt(2*NIS.GetParameter('INJ1', 'UEXQ')[2]*1e3*1.602e-19 / 3.344e-27) # in m/s
         vbeam2 = np.sqrt(2*NIS.GetParameter('INJ2', 'UEXQ')[3]*1e3*1.602e-19 / 3.344e-27) # in m/s
 
-        if args.src_num in (32194, 32232, 32342, 32427):
+        if args.src_num in (32184, 32187, 32194, 32232, 32342, 32427):
             from lib.imse import getDataFromIMSE
-            if args.src_num == 32194:
-                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num)
-            elif args.src_num == 32232:
-                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.99, 6.14),
-                                                    regions_of_interest = [(1.54, 1.60, 0.01, 0.05),
-                                                                           (1.60, 1.66, 0.01, 0.05),
-                                                                           (1.66, 1.72, 0.01, 0.05),
-                                                                           (1.72, 1.78, 0.01, 0.05),
-                                                                           (1.78, 1.84, 0.01, 0.05),
-                                                                           (1.84, 1.90, 0.01, 0.05),
-                                                                           (1.90, 1.96, 0.01, 0.05),
-                                                                           (1.96, 2.02, 0.01, 0.05),
-                                                                           (2.02, 2.08, 0.01, 0.05),
-                                                                           (1.54, 1.60, 0.05, 0.09),
-                                                                           (1.60, 1.66, 0.05, 0.09),
-                                                                           (1.66, 1.72, 0.05, 0.09),
-                                                                           (1.72, 1.78, 0.05, 0.09),
-                                                                           (1.78, 1.84, 0.05, 0.09),
-                                                                           (1.84, 1.90, 0.05, 0.09),
-                                                                           (1.90, 1.96, 0.05, 0.09),
-                                                                           (1.96, 2.02, 0.05, 0.09),
-                                                                           (2.02, 2.08, 0.05, 0.09),
-                                                                           (1.54, 1.60, 0.09, 0.13),
-                                                                           (1.60, 1.66, 0.09, 0.13),
-                                                                           (1.66, 1.72, 0.09, 0.13),
-                                                                           (1.72, 1.78, 0.09, 0.13),
-                                                                           (1.78, 1.84, 0.09, 0.13),
-                                                                           (1.84, 1.90, 0.09, 0.13),
-                                                                           (1.90, 1.96, 0.09, 0.13),
-                                                                           (1.96, 2.02, 0.09, 0.13),
-                                                                           (2.02, 2.08, 0.09, 0.13)]) 
-            elif args.src_num == 32342:
+            # default source: 8
+            # default regions of interest see lib/imse.py
+            if args.src_num == 32194: # early heating
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.5, 3.8))
+            elif args.src_num == 32232: # std H-mode
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.99, 6.14)) 
+            elif args.src_num == 32342: # early heating
                 # for i in range(14):
                 #    print '(%3.2f, %3.2f, 0.04, 0.08),'%(1.5+i*0.04, 1.5+(i+1)*0.04)
-                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.2, 3.5),
-                                                    regions_of_interest = [(1.50, 1.54, 0.04, 0.08),
-                                                                           (1.54, 1.58, 0.04, 0.08),
-                                                                           (1.58, 1.62, 0.04, 0.08),
-                                                                           (1.62, 1.66, 0.04, 0.08),
-                                                                           (1.66, 1.70, 0.04, 0.08),
-                                                                           (1.70, 1.74, 0.04, 0.08),
-                                                                           (1.74, 1.78, 0.04, 0.08),
-                                                                           (1.78, 1.82, 0.04, 0.08),
-                                                                           (1.82, 1.86, 0.04, 0.08),
-                                                                           (1.86, 1.90, 0.04, 0.08),
-                                                                           (1.90, 1.94, 0.04, 0.08),
-                                                                           (1.94, 1.98, 0.04, 0.08),
-                                                                           (1.98, 2.02, 0.04, 0.08),
-                                                                           (2.02, 2.06, 0.04, 0.08),])
-            elif args.src_num == 32427:
-                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.6, 5.8),
-                                                    regions_of_interest = [(1.50, 1.54, 0.04, 0.08),
-                                                                           (1.54, 1.58, 0.04, 0.08),
-                                                                           (1.58, 1.62, 0.04, 0.08),
-                                                                           (1.62, 1.66, 0.04, 0.08),
-                                                                           (1.66, 1.70, 0.04, 0.08),
-                                                                           (1.70, 1.74, 0.04, 0.08),
-                                                                           (1.74, 1.78, 0.04, 0.08),
-                                                                           (1.78, 1.82, 0.04, 0.08),
-                                                                           (1.82, 1.86, 0.04, 0.08),
-                                                                           (1.86, 1.90, 0.04, 0.08),
-                                                                           (1.90, 1.94, 0.04, 0.08),
-                                                                           (1.94, 1.98, 0.04, 0.08),
-                                                                           (1.98, 2.02, 0.04, 0.08),
-                                                                           (2.02, 2.06, 0.04, 0.08),])
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.2, 3.5))
+            elif args.src_num == 32427: # polychromator test shot
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.6, 5.8))
                 import dd as dd_latest
                 nis = dd_latest.shotfile('NIS', args.src_num)
                 p5 = nis('PNIQ').data[:,0,1]
@@ -736,8 +693,12 @@ class MSAwriter(object):
                         iunc[i, :] = 1.e4
 
                 #embed()
-                #sys.exit()             
-
+                #sys.exit()
+            elif args.src_num == 32184: # NTM 3/2
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.65, 4.05))
+            elif args.src_num == 32187: # std H-mode
+                it, igm, iunc, iR, iz, iAs = getDataFromIMSE(args.src_num, time_of_interest = (1.9, 6.2))
+            
             nIMSE = len(iR)
             nMSE = len(cfg.R)
 
@@ -856,6 +817,7 @@ class MSAwriter(object):
         return gmt[N-1:]-delay, np.array([lfilter(taps, 1.0, gm[:,i])[N-1:] for i in xrange(gm.shape[1])]).T
 
     def plot(self, what, args):
+        plt.figure(args.src_num)
         ax = plt.subplot(111)
         channels2use = args.only_channels
         if what=='MSA':
@@ -881,10 +843,12 @@ class MSAwriter(object):
 
             if args.channel_order is not None:
                 gm = gm[:, args.channel_order]
-                
-            gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
+            
+            if not args.ignore_NBI124:
+                gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
             gmt, gm = self.fir(gmt, gm, args)
-            gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
+            if not args.ignore_NBI124:
+                gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
             gm = self.onlyPlusMinus90(gm)
             lineObjects = plt.plot(gmt, gm, lw=2)
