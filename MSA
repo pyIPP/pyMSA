@@ -377,6 +377,66 @@ class MSAwriter(object):
             MBI.Close()
         return BTFt, BTFd
 
+    def readMSX2(self, args, all_raw=True, phase_reconstruction=True, nfft=None):
+        exp = args.src_exp
+        shot = args.src_num
+        useCalibration=args.use_calibration
+        upshiftPi=args.upshift_pi
+        no_b1 = args.no_b1
+        channelSetupFile=args.chs_file
+
+        self.pem40a = None    
+        self.pem46a = None
+
+        src = dd.shotfile()
+        if not src.Open('MSX', shot, exp):
+            return False
+
+
+        sg1 = src.GetSignalGroup('SG-1')
+        sg1t = src.GetTimebase('SG-1')/1e9 # nanoseconds...
+        pem40, pem46 = sg1[:,7], sg1[:,6]
+
+
+
+        print 'returning raw data...'
+        intensities = []
+        mse = []
+
+        BTF = lambda x: 0
+        
+        Nchan = 4
+        for i in range(Nchan):
+            print '%2i/%2i' %(i+1, Nchan)
+            data = sg1[:,i] # if i < 16 else sg2[:,i-16]
+            mset, cmse, intens = self._angleFromRawData(sg1t, data, pem40, pem46, 
+                                                1.,
+                                                0,
+                                                BTF,
+                                                0,
+                                                shiftby=0,
+                                                phase_reconstruction=phase_reconstruction, aux=i,
+                                                with_intensity=True, nfft=nfft, num=i)
+            mse.append(cmse)
+            intensities.append(intens)
+
+        '''
+        mset, cmse, intens = self._angleFromRawData(sg1t, sg1[:,0]/np.std(sg1[:,0])+sg1[:,3]/np.std(sg1[:,3]), pem40, pem46, 
+                                            1.,
+                                            0,
+                                            BTF,
+                                            0,
+                                            shiftby=0,
+                                            phase_reconstruction=phase_reconstruction, aux=i,
+                                            with_intensity=True, nfft=nfft, num=i)      
+        mse.append(cmse)
+        intensities.append(intens)  
+        '''
+        
+        config = None
+        return (np.array(mset), np.array(mse).T, config, np.array(intensities).T) 
+    
+
     def readMSX(self, args, just_time=False, all_raw=False, phase_reconstruction=True, nfft=None):
         exp = args.src_exp
         shot = args.src_num
