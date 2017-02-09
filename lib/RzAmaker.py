@@ -59,6 +59,9 @@ def getApproxIntersections(s0, s1, v0, v1, beamSubdivisionLength):
 
 def getMSExperp(s0, s):
     ''' determine MSE switchboard x-vector in torus space from MSE LsOS '''
+    # nah, we'll just use the 2015 value from now on; code below for reference
+    return np.array([-0.89054714,  0.41783235,  0.17983856])
+
     s1 = s0+2*s
     p0 = np.average(s0, axis=0)
     p1 = np.average(s1, axis=0)
@@ -83,7 +86,8 @@ def getMSExperp(s0, s):
     vec /= norm(vec)
     return vec
 
-def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(60), withMSEvec=False):
+def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(60), withMSEvec=False,
+    outputplot=False):
     '''generates MSE R, z, A coords for pi and sigma from a FARO measurement'''
 
     s0, s = getLOSfromSPRD(int(year))
@@ -96,24 +100,34 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
 
     isecs = getApproxIntersections(s0, s1, v0, v1, beamSubdivisionLength)
 
-    if plot:
+
+    toplot = {}
+    toplot['LOS'] = []
+
+    if plot or outputplot:
         import kk_abock as kk
         try:
-            from mayavi import mlab # needs intel/12.1!!!!
+            if plot: from mayavi import mlab # needs intel/12.1!!!!
         except Exception, e:
             print 'mayavi failed to load, are you using intel/12.1?'
             raise e
         for i in xrange(60):
             ts0 = s0 - 1.5*s
-            mlab.plot3d([ts0[i,0], s1[i,0]], [ts0[i,1], s1[i,1]], [ts0[i,2], s1[i,2]], tube_radius=None, color=(1,0,0))
-        mlab.points3d(isecs[:,0], isecs[:,1], isecs[:,2])
-        mlab.plot3d([v0[0], v1[0]], [v0[1], v1[1]], [v0[2], v1[2]], color=(0,1,0))
-        mlab.view(0, 0, distance=10, focalpoint=[0,0,0])
+            if plot: mlab.plot3d([ts0[i,0], s1[i,0]], [ts0[i,1], s1[i,1]], [ts0[i,2], s1[i,2]], tube_radius=None, color=(1,0,0))
+            toplot['LOS'].append([[ts0[i,0], s1[i,0]], [ts0[i,1], s1[i,1]], [ts0[i,2], s1[i,2]]])
+
+        if plot: mlab.points3d(isecs[:,0], isecs[:,1], isecs[:,2])
+        if plot: mlab.plot3d([v0[0], v1[0]], [v0[1], v1[1]], [v0[2], v1[2]], color=(0,1,0))
+        if plot: mlab.view(0, 0, distance=10, focalpoint=[0,0,0])
+
+        toplot['isecs'] = [isecs[:,0], isecs[:,1], isecs[:,2]]
+        toplot['beam'] = [[v0[0], v1[0]], [v0[1], v1[1]], [v0[2], v1[2]]]
 
         for R in [1.65]: #, 1.8, 1.95]: # axis
             x = R * cos(np.linspace(0,2*np.pi, 128))
             y = R * sin(np.linspace(0,2*np.pi, 128))
-            mlab.plot3d(x,y,[0]*len(x), tube_radius=None)
+            if plot: mlab.plot3d(x,y,[0]*len(x), tube_radius=None)
+            toplot['axis'] = [x,y,[0]*len(x)]
 
         eq = kk.kk()
         eq.Open(31113, 'AUGD', 'EQI')
@@ -126,8 +140,8 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
         sepz = np.array(sepz)
         # separatrix:
         phi = -0.37
-        mlab.plot3d(np.cos(phi)*sepR, np.sin(phi)*sepR, sepz, tube_radius=None)
-
+        if plot: mlab.plot3d(np.cos(phi)*sepR, np.sin(phi)*sepR, sepz, tube_radius=None)
+        toplot['sep'] = [np.cos(phi)*sepR, np.sin(phi)*sepR, sepz]
 
     xperp = getMSExperp(s0, s)
 
@@ -197,6 +211,8 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
         Ymse = cross(Zmse, xperp)
         Xmse = cross(Ymse, Zmse)
         return output, (Xmse, Ymse, Zmse, xperp)
+    elif outputplot:
+        return output, toplot
     else:
         return output
 
