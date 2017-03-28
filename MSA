@@ -575,6 +575,7 @@ class MSAwriter(object):
         #farofile = 'mse2014.txt'
         year = 2014
         if shot > 31776: year = 2015 #farofile = 'mse2015.txt'
+        if shot > 33724: year = 2017
         #print('generating geometric information from FARO (lib/%s) and %s...'%(
         #    farofile, ('MSX/CH-SETUP' if not channelSetupFile else channelSetupFile)))
         rza = makeRzAs(year)

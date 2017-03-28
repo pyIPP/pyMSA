@@ -24,10 +24,15 @@ def getLOSfromSPRD(year):
     lines = [l for l in open('/afs/ipp/u/sprd/loscoord/LOS_COORD_%4i'%year).readlines() if 'MSS' in l]
     s0 = np.zeros((60,3))
     s1 = np.zeros((60,3))
-    for i, l in enumerate(lines):
+    for l in lines:
         R0, phi0, z0, R1, phi1, z1 = np.array(l.split()[1:],float)
+        row, column = l.split()[0][5:].split('L')
+        column = int(column.replace("'", ""))
+        row = int(row)
+        i = (row-1)*6+column-1
         s0[i] = R0*cos(phi0/180.*np.pi), R0*sin(phi0/180.*np.pi), z0
         s1[i] = R1*cos(phi1/180.*np.pi), R1*sin(phi1/180.*np.pi), z1
+    
     ds = s1-s0; ds = (ds.T/norm(ds, axis=1)).T
     return s0, ds
 
@@ -47,6 +52,7 @@ def getApproxIntersections(s0, s1, v0, v1, beamSubdivisionLength):
         vmat[:,j] = np.linspace(v0[j], v1[j], vn)
     intersections = np.zeros_like(s0)
     for i in xrange(s0.shape[0]):
+        if np.isnan(sn[i]): continue
         smat = np.zeros((int(sn[i]), 3))
         for j in xrange(3):
             smat[:,j] = np.linspace(s0[i,j], s1[i,j], sn[i])
@@ -89,6 +95,8 @@ def getMSExperp(s0, s):
 def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(60), withMSEvec=False,
     outputplot=False):
     '''generates MSE R, z, A coords for pi and sigma from a FARO measurement'''
+
+    #year = 2015 if year == 2017 else year
 
     s0, s = getLOSfromSPRD(int(year))
 
