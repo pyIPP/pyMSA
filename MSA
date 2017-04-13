@@ -477,7 +477,7 @@ class MSAwriter(object):
             calib_factor = [1.0]*20
             faraday_degree = [0.0]*20
             BTF = interp1d([-10, 100], [-2.5, -2.5], fill_value=-2.5, bounds_error=False)
-            b1 = 0 if no_b1 else 66.7
+            b1 = 0 #if no_b1 else 66.7
 
         src = dd.shotfile()
         if not src.Open('MSX', shot, exp):
@@ -584,6 +584,8 @@ class MSAwriter(object):
         A = np.zeros((nchan,10))
         Rs = []
         Zs = []
+        cols = []
+        rows = []
         for i in xrange(nchan):
             chInd = np.where(srcLOS == getActualBox(i) + 1)
             R[i] = np.average(rza.R[chInd])
@@ -594,11 +596,16 @@ class MSAwriter(object):
                    np.average(rza.Api[   chInd], axis=0)
             Rs.append(rza.R[chInd])
             Zs.append(rza.z[chInd])
+            cols.append(rza.column[chInd])
+            rows.append(rza.row[chInd])
+
         pisigma = srcPiSigma[np.where(srcPiSigma != 0)[0]]
         labels = np.array(['%s %s'%(channelmap[getActualBox(i)][2], 'pi' if pisigma[i] == 1 else 'sigma') 
                            for i in xrange(nchan)])
         o = R.argsort()[::-1] # order by R descending for easier usage
-        config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], dR=dR[o], dZ=dZ[o], labels=list(labels[o]), raw_R=Rs, raw_z=Zs)
+        config = Bunch(R=R[o], z=Z[o], A=A[o], pisigma=pisigma[o], 
+            dR=dR[o], dZ=dZ[o], labels=list(labels[o]), raw_R=Rs, raw_z=Zs,
+            cols=cols, rows=rows)
         print('done')
         
         if all_raw: return (np.array(mset), np.array(mse).T, config, np.array(intensities).T)
@@ -1000,38 +1007,92 @@ class MSAwriter(object):
             return False
         return self.writeMSA(args.dest_exp, args.dest_num, res)
         
-    def correct(self, args, time, gm, config):
+    def correct(self, args, time, gm, config, correct_for_instrument=True, correct_for_faraday=True):
         # gives corrected angles back to MSAwriter
         import dd_20160311 as dd
-        params = np.load('./lib/Parameters2016.npy')
-        params_arr = np.array([list(p) for p in params])
-        faradayRotation = np.load('./lib/FaradayEffekt2016.npy')
-        vacuumEffect = np.load('./lib/VacuumEffect2016.npy')
-        correctAngles = []
-        # for Btor changes with time it is necessary to compare time bases of MSA and MAI
-        MAI = dd.shotfile('MAI', args.src_num, 'AUGD')
-        maiTime = MAI.getObjectData('T-MAG-1')
-        msaTime = time
-        btf = MAI.getObjectData('BTF')
-        new_btf = interp1d(maiTime, btf)(time)
-        
-        new_gm = []
-        for i in range(gm.shape[1]):
-            param_ind = []
-            for j in range(len(config.raw_R[i])):
-                raw_R = config.raw_R[i][j]
-                raw_Z = config.raw_z[i][j]
-                param_ind.append((np.sqrt((params_arr[:,2]-raw_R)**2 + (params_arr[:,3]-raw_Z)**2)).argmin())
-            bmeas, bcalc, a, b, c, d, p1, p2 =  np.average(params_arr[param_ind],axis=0)[4:12]
-            cols = [p[0] for p in params_arr[param_ind]]            
-            faraday_rotation = np.average([f[1] for f in faradayRotation if f[0] in cols])
-            gt = np.linspace(-180, 180, 720*1000)
-            gm2gt = interp1d(a*gt+b*np.sin(2*gt*np.pi/180.+p1)+c*np.sin(4*gt*np.pi/180.+p2)+d, gt)
-            new_gm.append(gm2gt(gm[:,i]))
-            new_gm[-1] -= new_btf*faraday_rotation
-            new_gm[-1] += vacuumEffect[0][0]
-        new_gm = np.array(new_gm).T
-        return np.array(new_gm)
+        oldcwd = os.getcwd()
+        if os.path.dirname(os.path.realpath(__file__)) != oldcwd:
+            os.chdir(os.path.dirname(os.path.realpath(__file__)))
+        try:
+            MAI = dd.shotfile('MAI', args.src_num, 'AUGD')
+            maiTime = MAI.getObjectData('T-MAG-1')
+            btf = MAI.getObjectData('BTF')
+            new_btf = interp1d(maiTime, btf)(time)
+            if args.src_num < 33725:
+                params = np.load('./lib/Parameters2016.npy')
+                params_arr = np.array([list(p) for p in params])
+                faradayRotation = np.load('./lib/FaradayEffekt2016.npy')
+                vacuumEffect = np.load('./lib/VacuumEffect2016.npy')
+                # for Btor changes with time it is necessary to compare time bases of MSA and MAI
+
+                
+                new_gm = []
+                for i in range(gm.shape[1]):
+                    param_ind = []
+                    for j in range(len(config.raw_R[i])):
+                        raw_R = config.raw_R[i][j]
+                        raw_Z = config.raw_z[i][j]
+                        param_ind.append((np.sqrt((params_arr[:,2]-raw_R)**2 + (params_arr[:,3]-raw_Z)**2)).argmin())
+                    bmeas, bcalc, a, b, c, d, p1, p2 =  np.average(params_arr[param_ind],axis=0)[4:12]
+                    cols = [p[0] for p in params_arr[param_ind]]            
+                    faraday_rotation = np.average([f[1] for f in faradayRotation if f[0] in cols])
+                    gt = np.linspace(-180, 180, 720*1000)
+                    gm2gt = interp1d(a*gt+b*np.sin(2*gt*np.pi/180.+p1)+c*np.sin(4*gt*np.pi/180.+p2)+d, gt)
+                    new_gm.append(gm2gt(gm[:,i]))
+                    new_gm[-1] -= new_btf*faraday_rotation
+                    new_gm[-1] += vacuumEffect[0][0]
+                new_gm = np.array(new_gm).T
+                return np.array(new_gm)
+            else:
+                params = np.load('./lib/Parameters2017.npy')
+                faraday = np.load('lib/Faraday2017.npy')
+                #print faraday
+                new_gm = copy(gm)
+                for i in range(gm.shape[1]):
+                    #print i, ":"
+                    pmask = None
+                    fmask = None
+                    for j in range(config.cols[i].shape[0]):
+                        row, column = config.rows[i][j], config.cols[i][j]
+                        if pmask is None:
+                            pmask = (params['Column'] == column) * (params['Line'] == row)
+                        else:
+                            pmask |= (params['Column'] == column) * (params['Line'] == row)
+                        if fmask is None:
+                            fmask = (faraday['Column'] == column)
+                        else:
+                            fmask |= (faraday['Column'] == column)
+                    #print pmask
+
+                    a,a4,a2,a8,eoff,p4,p2,p8 = np.average([list(p) for p in 
+                        params[['alin', 'b4pi', 'c2pi', 'd8pi', 
+                                'eoff', 'p14pi', 'p22pi', 'p38pi']][pmask]], axis=0)
+
+                    #print i,':', a,a4,a2,a8,eoff,p4,p2,p8
+
+                    f_afterwin, f_win = np.average([list(f) for f in faraday[['Only Faraday Effect without Window',
+                        'Difference/Only Window']][fmask]], axis=0)
+
+                    #print f_afterwin, f_win
+                    #print new_btf                    
+                    #print a,a4,a2,a8,eoff,p4,p2,p8
+                    if correct_for_faraday:
+                        new_gm[:,i] -= new_btf*f_win
+                    xx = np.linspace(-500, 500, 100000)
+                    func = interp1d(eoff+a*xx + a2*np.sin(2*np.pi/180.*xx+p2)  # c2pi p22pi
+                                              + a4*np.sin(4*np.pi/180.*xx+p4)  # b4pi p14pi
+                                              + a8*np.sin(8*np.pi/180.*xx+p8), xx) # d8pi p38pi
+                    if correct_for_instrument:
+                        new_gm[:,i] = func(new_gm[:,i])
+                    else:
+                        new_gm[:,i] -= eoff
+                    if correct_for_faraday:
+                        new_gm[:,i] -= new_btf*f_afterwin
+                return new_gm
+        except Exception, e:
+            raise e
+        finally:
+            os.chdir(oldcwd)
 
 default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
     fir=(30,15,4), no_b1=True)

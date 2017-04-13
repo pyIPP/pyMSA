@@ -24,17 +24,24 @@ def getLOSfromSPRD(year):
     lines = [l for l in open('/afs/ipp/u/sprd/loscoord/LOS_COORD_%4i'%year).readlines() if 'MSS' in l]
     s0 = np.zeros((60,3))
     s1 = np.zeros((60,3))
+    column = np.zeros((60))
+    line = np.zeros((60))
     for l in lines:
         R0, phi0, z0, R1, phi1, z1 = np.array(l.split()[1:],float)
-        row, column = l.split()[0][5:].split('L')
-        column = int(column.replace("'", ""))
+        row, column1 = l.split()[0][5:].split('L')
+        column1 = int(column1.replace("'", ""))
         row = int(row)
-        i = (row-1)*6+column-1
+        i = (row-1)*6+column1-1
         s0[i] = R0*cos(phi0/180.*np.pi), R0*sin(phi0/180.*np.pi), z0
         s1[i] = R1*cos(phi1/180.*np.pi), R1*sin(phi1/180.*np.pi), z1
-    
+        line[i] = row
+        column[i] = column1
+
     ds = s1-s0; ds = (ds.T/norm(ds, axis=1)).T
-    return s0, ds
+    row = column
+    column = line
+    return s0, ds, row, column
+    #return s0, ds, column, line
 
 def getNBIgeo():
     ''' NBI geometry from bgeiger '''
@@ -69,7 +76,7 @@ def getMSExperp(s0, s):
     return np.array([-0.89054714,  0.41783235,  0.17983856])
 
     s1 = s0+2*s
-    p0 = np.average(s0, axis=0)
+    #p0 = np.average(s0, axis=0)
     p1 = np.average(s1, axis=0)
     dp = np.average(s, axis=0)
     dp = dp/norm(dp)
@@ -98,7 +105,7 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
 
     #year = 2015 if year == 2017 else year
 
-    s0, s = getLOSfromSPRD(int(year))
+    s0, s, row, column = getLOSfromSPRD(int(year))
 
     s1 = s0 + 2.2*s
     s0 = s0 + 1.0*s
@@ -187,14 +194,17 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
     A9  = (st**2*xpR + sz**2*xpR - sR*st*xpt - sR*sz*xpz)
     A10 = (-sR*sz*xpR + sR**2*xpz + st*(-sz*xpt + st*xpz))
 
-    Api    = -np.array((A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)).T
+    Api    = np.array((A1, A2, A3, A4, A5, A6, A7, A8, A9, A10)).T
     Asigma = -np.array((A6, A7, A8, A9, A10, -A1, -A2, -A3, -A4, -A5)).T
 
     output = Bunch(
                 R = np.zeros(60),
                 z = np.zeros(60),
+                row = np.zeros(60),
+                column = np.zeros(60),
                 Asigma = np.zeros((60,10)),
                 Api = np.zeros((60,10)),
+
               )
 
     # map to our nomenclature, i.e. top right on switchbard = first channel, bottom left last channel
@@ -211,6 +221,10 @@ def makeRzAs(year=2014, plot=False, beamSubdivisionLength=1e-3, channels=range(6
 
     output.R = isecR[newOrder]
     output.z = isecZ[newOrder]
+
+    output.column = column[newOrder]
+    output.row = row[newOrder]
+    
     output.Asigma = Asigma[newOrder]
     output.Api = Api[newOrder]
 
