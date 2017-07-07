@@ -237,6 +237,7 @@ class MSAwriter(object):
                           plot=False, 
                           exp_calib=False, column=None, with_intensity=False, num=None):
         nfft = 2048*4 if nfft is None else nfft
+        #nfft = 2048*2
         tcopy = copy(t)
 
         t0, dt = t[0], np.average(np.gradient(tcopy))
@@ -421,7 +422,7 @@ class MSAwriter(object):
             intensities.append(intens)
 
         '''
-        mset, cmse, intens = self._angleFromRawData(sg1t, sg1[:,0]/np.std(sg1[:,0])+sg1[:,3]/np.std(sg1[:,3]), pem40, pem46, 
+        mset, cmse, intens = self._angleFromRawData(sg1t, sg1[:,0]/np.std(1sg1[:,0])+sg1[:,3]/np.std(sg1[:,3]), pem40, pem46, 
                                             1.,
                                             0,
                                             BTF,
@@ -444,6 +445,7 @@ class MSAwriter(object):
         upshiftPi=args.upshift_pi
         no_b1 = args.no_b1
         channelSetupFile=args.chs_file
+        legacy = args.legacy_sg
 
         self.pem40a = None
         self.pem46a = None
@@ -482,9 +484,23 @@ class MSAwriter(object):
         src = dd.shotfile()
         if not src.Open('MSX', shot, exp):
             return False
-        sg1 = src.GetSignalGroup('SG-1')
-        sg2 = src.GetSignalGroup('SG-2')
-        sg1t = src.GetTimebase('SG-1')/1e9 # nanoseconds...
+
+        if legacy:
+            print('Using legacy signal groups...')
+            sg1 = src.GetSignalGroup('SG-1')
+            sg2 = src.GetSignalGroup('SG-2')
+            sg3 = src.GetSignalGroup('SG-3')
+            sg1t = src.GetTimebase('SG-1')/1e9 # nanoseconds...
+        else:
+            print('Using new signals/signal groups...')
+            sg1t = src.GetTimebase('TIME-AD0')/1e9
+            sg1 = np.zeros((len(sg1t), 16))
+            sg2 = None
+            sg3 = None
+            for i in range(10):
+                sg1[:,i] = src.GetSignal('PMT_%02i'%(i+1))
+            sg1[:,15] = src.GetSignal('REF_F40')
+            sg1[:,14] = src.GetSignal('REF_F46')
 
         if channelSetupFile:
             print('Using %s instead of MSX\' channel setup!'%channelSetupFile)
@@ -533,9 +549,14 @@ class MSAwriter(object):
         if all_raw:
             print 'returning raw data...'
             intensities = []
-            for i in range(26):
-                print '%2i/%2i' %(i+1, 26)
-                data = sg1[:,i] if i < 16 else sg2[:,i-16]
+            n_rawchans = 32
+            for i in range(n_rawchans):
+                print '%2i/%2i' %(i+1, n_rawchans)
+                try:
+                    data = sg1[:,i] if i < 16 else sg3[:,i-16] #sg2 vs sg3, polychrom
+                except:
+                    print('Error, skipping...')
+                    continue
                 mset, cmse, intens = self._angleFromRawData(sg1t, data, pem40, pem46, 
                                                     1.,
                                                     0,
@@ -916,7 +937,9 @@ class MSAwriter(object):
             if res == False:
                 return False
             gmt, gm, cfg = res
-            
+
+            #gm = self.correct(args, gmt, gm, cfg) # corrected angles
+
             print 'ch, R, z, A1-10'
             for i in xrange(gm.shape[1]):
                 print '%2i   %4.3f   %+4.3f  '%(i+1, cfg.R[i], cfg.z[i]), '  '.join('%+5.4f'%F for F in cfg.A[i] )
@@ -933,6 +956,8 @@ class MSAwriter(object):
                 gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
             gm = self.onlyPlusMinus90(gm)
+
+
             lineObjects = plt.plot(gmt, gm, lw=2)
             labels = cfg.labels
   
@@ -1017,7 +1042,7 @@ class MSAwriter(object):
             MAI = dd.shotfile('MAI', args.src_num, 'AUGD')
             maiTime = MAI.getObjectData('T-MAG-1')
             btf = MAI.getObjectData('BTF')
-            new_btf = interp1d(maiTime, btf)(time)
+            new_btf = interp1d(maiTime, btf, bounds_error=False)(time)
             if args.src_num < 33725:
                 params = np.load('./lib/Parameters2016.npy')
                 params_arr = np.array([list(p) for p in params])
@@ -1036,8 +1061,8 @@ class MSAwriter(object):
                     bmeas, bcalc, a, b, c, d, p1, p2 =  np.average(params_arr[param_ind],axis=0)[4:12]
                     cols = [p[0] for p in params_arr[param_ind]]            
                     faraday_rotation = np.average([f[1] for f in faradayRotation if f[0] in cols])
-                    gt = np.linspace(-180, 180, 720*1000)
-                    gm2gt = interp1d(a*gt+b*np.sin(2*gt*np.pi/180.+p1)+c*np.sin(4*gt*np.pi/180.+p2)+d, gt)
+                    gt = np.linspace(-4*180, 4*180, 4*720*1000)
+                    gm2gt = interp1d(a*gt+b*np.sin(2*gt*np.pi/180.+p1)+c*np.sin(4*gt*np.pi/180.+p2)+d, gt, bounds_error=False)
                     new_gm.append(gm2gt(gm[:,i]))
                     new_gm[-1] -= new_btf*faraday_rotation
                     new_gm[-1] += vacuumEffect[0][0]
@@ -1070,6 +1095,7 @@ class MSAwriter(object):
 
                     #print i,':', a,a4,a2,a8,eoff,p4,p2,p8
 
+
                     f_afterwin, f_win = np.average([list(f) for f in faraday[['Only Faraday Effect without Window',
                         'Difference/Only Window']][fmask]], axis=0)
 
@@ -1078,22 +1104,27 @@ class MSAwriter(object):
                     #print a,a4,a2,a8,eoff,p4,p2,p8
                     if correct_for_faraday:
                         new_gm[:,i] -= new_btf*f_win
-                    xx = np.linspace(-500, 500, 100000)
+                    xx = np.linspace(-1500, 1500, 300000)
                     func = interp1d(eoff+a*xx + a2*np.sin(2*np.pi/180.*xx+p2)  # c2pi p22pi
                                               + a4*np.sin(4*np.pi/180.*xx+p4)  # b4pi p14pi
-                                              + a8*np.sin(8*np.pi/180.*xx+p8), xx) # d8pi p38pi
+                                              + a8*np.sin(8*np.pi/180.*xx+p8),  # d8pi p38pi
+                                              xx, bounds_error=False)
                     if correct_for_instrument:
                         new_gm[:,i] = func(new_gm[:,i])
                     else:
                         new_gm[:,i] -= eoff
                     if correct_for_faraday:
                         new_gm[:,i] -= new_btf*f_afterwin
+                embed()
+                sys.exit()
                 return new_gm
         except Exception, e:
             raise e
         finally:
             os.chdir(oldcwd)
 
+
+        
 default_args = Bunch(src_exp='AUGD', src_num=32096, use_calibration=False, upshift_pi=False, chs_file=None,
     fir=(30,15,4), no_b1=True)
 
@@ -1133,7 +1164,8 @@ def main():
         help="apply overall offset b1, default: yes")    
     parser.add_argument('-ec', '--exp-calib', dest='exp_calib', action='store_true', default=False,
         help="use experimental calibration, default: no")
-    
+    parser.add_argument('-ly', '--legacy', dest='legacy_sg', action='store_true', default=False,
+        help="use legacy signal group SG1, default: no")    
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
