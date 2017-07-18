@@ -954,7 +954,8 @@ class MSAwriter(object):
             
             if not args.ignore_NBI124:
                 gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
-            gmt, gm = gmt, gm if args.no_fir else self.fir(gmt, gm, args)
+            #embed()
+            gmt, gm = (gmt, gm) if args.no_fir else self.fir(gmt, gm, args)
             if not args.ignore_NBI124:
                 gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
