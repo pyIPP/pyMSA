@@ -276,10 +276,18 @@ class MSAwriter(object):
         #if aux == 9:
         #    embed()
 
+        #embed()
+
+        
+
         if phase_reconstruction:
             # use phase difference between pem reference signal and measured signal for intensity sign information
-            adiff40 = ((a[i40]-self.pem40a[i40])%(2*np.pi) > np.pi).astype(int)*2-1
-            adiff46 = ((a[i46]-self.pem46a[i46])%(2*np.pi) > np.pi).astype(int)*2-1
+
+            adiff40 = ((a[i40]-self.pem40a[i40]-0.5)%(2*np.pi) > np.pi).astype(int)*2-1
+            adiff46 = ((a[i46]-self.pem46a[i46]-0.5)%(2*np.pi) > np.pi).astype(int)*2-1
+
+            # ^---: 0.5 = workaround to get phase diff away from exactly pi.
+            # this will break eventually if the phase shifts (again), but for now it works and I'm not sure how to properly fix it.
 
             # use sign from previous lines to create "negative" intensities for full arctan2 usage
             I40 = np.sum(I[i40s], axis=0)**0.5 * adiff40
