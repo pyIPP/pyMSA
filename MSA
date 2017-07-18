@@ -446,6 +446,7 @@ class MSAwriter(object):
         no_b1 = args.no_b1
         channelSetupFile=args.chs_file
         legacy = args.legacy_sg
+	nfft = args.nfft if nfft is None else nfft
 
         self.pem40a = None
         self.pem46a = None
@@ -743,12 +744,14 @@ class MSAwriter(object):
         if args.channel_order is not None:
             gm = gm[:, args.channel_order]
 
+        #embed()
+
         if onlyNBI3:
             gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
         gmtb, gmb = copy(gmt), copy(self.onlyPlusMinus90(gm))
 
-        gmt, gm = self.fir(gmt, gm, args)
+        gmt, gm = (gmt, gm) if args.no_fir else self.fir(gmt, gm, args)
         if onlyNBI3:
             gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
         gm = self.onlyPlusMinus90(gm)
@@ -933,7 +936,7 @@ class MSAwriter(object):
             lineObjects = plt.plot(gmt, gm[:,piCh], '--', dashes=(8,2)) + plt.plot(gmt, gm[:,sigCh])
             labels = ['Ch %i (pi)'%(i+1) for i in piCh] + ['Ch %i (sigma)'%(i+1) for i in sigCh]
         else:
-            res = self.readMSX(args)
+            res = self.readMSX(args, phase_reconstruction=not args.phase_det)
             if res == False:
                 return False
             gmt, gm, cfg = res
@@ -951,7 +954,7 @@ class MSAwriter(object):
             
             if not args.ignore_NBI124:
                 gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
-            gmt, gm = self.fir(gmt, gm, args)
+            gmt, gm = gmt, gm if args.no_fir else self.fir(gmt, gm, args)
             if not args.ignore_NBI124:
                 gmt, gm = self.removeIncompatibleTimes(args.src_num, gmt, gm)
 
@@ -1115,8 +1118,8 @@ class MSAwriter(object):
                         new_gm[:,i] -= eoff
                     if correct_for_faraday:
                         new_gm[:,i] -= new_btf*f_afterwin
-                embed()
-                sys.exit()
+                #embed()
+                #sys.exit()
                 return new_gm
         except Exception, e:
             raise e
@@ -1156,6 +1159,8 @@ def main():
     #    help='smooth result over x ms, e.g. -s 4 for 4ms moving average')
     parser.add_argument('-fir', dest='fir', type=str, default='30,15,4',
         help='smooth using Kaiser FIR low pass filter, arguments: ripple,width,cutoffHz default: -fir 30,15,4')
+    parser.add_argument('-nf', '--no-fir', dest='no_fir', action='store_true', default=False,
+        help="disable fir filtering")
     parser.add_argument('-co', '--channel-order', dest='channel_order', type=str, default=None,
         help='reorder channels, e.g. "-co 1,2,3,4,5,6,7,9,8,10" for shots before 30992')
     parser.add_argument('-po', '--plot-options', dest='plot_options', type=str, default='',
@@ -1165,11 +1170,20 @@ def main():
     parser.add_argument('-ec', '--exp-calib', dest='exp_calib', action='store_true', default=False,
         help="use experimental calibration, default: no")
     parser.add_argument('-ly', '--legacy', dest='legacy_sg', action='store_true', default=False,
+        help="omit phase reconstruction for full 180deg coverage. default: no")   
+    parser.add_argument('-np', '--no-phase', dest='phase_det', action='store_true', default=False,
         help="use legacy signal group SG1, default: no")    
+    parser.add_argument('-nfft', '--nfft', type=int, default=4*2048,
+        help='nfft, default 8192')    
     parser.add_argument('action', help='one of: %s'%(
         '; '.join(['"%s" -> %s'%i for i in zip(possibleActions, paexpl)])))
 
     args = parser.parse_args()
+
+
+    if args.src_num < 34606:
+        args.legacy_sg = True
+
 
     if args.fir is not None:
         args.fir = [float(k) for k in args.fir.split(',')]
